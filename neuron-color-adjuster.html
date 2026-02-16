@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Neuron Color Adjuster</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; height: 100vh; overflow: hidden; }
+  #sidebar { width: 300px; min-width: 300px; background: #16213e; padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+  #sidebar h2 { font-size: 16px; color: #a0c4ff; margin-bottom: 4px; }
+  #viewer { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  #canvasArea { flex: 1; display: flex; align-items: center; justify-content: center; gap: 16px; overflow: auto; padding: 16px; }
+  .img-panel { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .img-panel canvas { max-height: 85vh; object-fit: contain; background: #000; }
+  .img-label { font-size: 12px; color: #888; }
+  #dropZone { border: 2px dashed #444; border-radius: 8px; padding: 40px; text-align: center; cursor: pointer; transition: border-color 0.2s; }
+  #dropZone:hover, #dropZone.dragover { border-color: #a0c4ff; }
+  #dropZone p { margin: 8px 0; }
+  .slider-group { display: flex; flex-direction: column; gap: 2px; }
+  .slider-group label { font-size: 13px; display: flex; justify-content: space-between; }
+  .slider-group input[type=range] { width: 100%; accent-color: #a0c4ff; }
+  .slider-group .val { font-variant-numeric: tabular-nums; min-width: 50px; text-align: right; }
+  button.primary { background: #0f3460; color: #e0e0e0; border: 1px solid #1a4a8a; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+  button.primary:hover { background: #1a4a8a; }
+  button.primary:disabled { opacity: 0.4; cursor: default; }
+  #fileInput { display: none; }
+  #status { font-size: 12px; color: #888; min-height: 18px; }
+  .controls { display: flex; flex-direction: column; gap: 10px; }
+  #zoomBar { display: flex; align-items: center; gap: 8px; padding: 4px 16px; background: #16213e; font-size: 13px; }
+  #zoomBar button { background: none; border: 1px solid #444; color: #ccc; padding: 2px 8px; border-radius: 3px; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h2>Neuron Color Adjuster</h2>
+
+  <div id="dropZone" onclick="document.getElementById('fileInput').click()">
+    <p>Drop image here or click to open</p>
+    <p style="font-size:12px;color:#666">PNG / JPG</p>
+  </div>
+  <input type="file" id="fileInput" accept="image/*">
+
+  <div class="controls" id="sliders" style="display:none">
+    <div class="slider-group">
+      <label>bg <span class="val" id="val_bg"></span></label>
+      <input type="range" id="bg" min="0" max="50" step="0.25" value="10">
+    </div>
+    <div class="slider-group">
+      <label>neuron mult <span class="val" id="val_neuron_mult"></span></label>
+      <input type="range" id="neuron_mult" min="0" max="30" step="0.25" value="15">
+    </div>
+    <div class="slider-group">
+      <label>dark green clip <span class="val" id="val_dark_green_clip"></span></label>
+      <input type="range" id="dark_green_clip" min="0" max="255" step="1" value="150">
+    </div>
+    <div class="slider-group">
+      <label>dark green mult <span class="val" id="val_dark_green_mult"></span></label>
+      <input type="range" id="dark_green_mult" min="0" max="3" step="0.05" value="1">
+    </div>
+    <div class="slider-group">
+      <label>neuropil mult <span class="val" id="val_neuropil_mult"></span></label>
+      <input type="range" id="neuropil_mult" min="0" max="2" step="0.01" value="0.8">
+    </div>
+
+    <button class="primary" onclick="saveFullImage()">Save full image</button>
+    <button class="primary" onclick="saveT1Image()">Save T1 image</button>
+    <button class="primary" onclick="saveSettings()">Save settings JSON</button>
+    <button class="primary" onclick="document.getElementById('settingsInput').click()">Load settings JSON</button>
+    <input type="file" id="settingsInput" accept=".json" style="display:none">
+    <div id="status"></div>
+  </div>
+</div>
+
+<div id="viewer">
+  <div id="zoomBar">
+    <button onclick="setZoom(zoom/1.25)">-</button>
+    <span id="zoomLabel">100%</span>
+    <button onclick="setZoom(zoom*1.25)">+</button>
+    <button onclick="setZoom('fit')">Fit</button>
+    <button onclick="setZoom(1)">1:1</button>
+  </div>
+  <div id="canvasArea">
+    <div class="img-panel">
+      <canvas id="origCanvas"></canvas>
+      <span class="img-label">Original</span>
+    </div>
+    <div class="img-panel">
+      <canvas id="procCanvas"></canvas>
+      <span class="img-label">Processed</span>
+    </div>
+  </div>
+</div>
+
+<script>
+const origCanvas = document.getElementById('origCanvas');
+const procCanvas = document.getElementById('procCanvas');
+const origCtx = origCanvas.getContext('2d');
+const procCtx = procCanvas.getContext('2d');
+
+let originalImageData = null; // ImageData of the loaded image
+let sourceFileName = '';
+let zoom = 1;
+let fitZoom = 1;
+
+const SLIDER_IDS = ['bg', 'neuron_mult', 'dark_green_clip', 'dark_green_mult', 'neuropil_mult'];
+
+// Wire up sliders
+SLIDER_IDS.forEach(id => {
+  const el = document.getElementById(id);
+  const valEl = document.getElementById('val_' + id);
+  valEl.textContent = parseFloat(el.value).toFixed(2);
+  el.addEventListener('input', () => {
+    valEl.textContent = parseFloat(el.value).toFixed(2);
+    processImage();
+  });
+});
+
+// File input
+document.getElementById('fileInput').addEventListener('change', e => {
+  if (e.target.files[0]) loadFile(e.target.files[0]);
+});
+
+// Settings input
+document.getElementById('settingsInput').addEventListener('change', e => {
+  if (e.target.files[0]) loadSettings(e.target.files[0]);
+});
+
+// Drag and drop
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+
+function loadFile(file) {
+  sourceFileName = file.name;
+  const img = new Image();
+  img.onload = () => {
+    origCanvas.width = img.width;
+    origCanvas.height = img.height;
+    procCanvas.width = img.width;
+    procCanvas.height = img.height;
+    origCtx.drawImage(img, 0, 0);
+    originalImageData = origCtx.getImageData(0, 0, img.width, img.height);
+    document.getElementById('sliders').style.display = 'flex';
+    setZoom('fit');
+    processImage();
+    setStatus('Loaded: ' + file.name);
+  };
+  img.src = URL.createObjectURL(file);
+}
+
+function loadSettings(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      const params = data.parameters || data;
+      SLIDER_IDS.forEach(id => {
+        if (params[id] !== undefined) {
+          const el = document.getElementById(id);
+          el.value = params[id];
+          document.getElementById('val_' + id).textContent = parseFloat(params[id]).toFixed(2);
+        }
+      });
+      processImage();
+      setStatus('Loaded settings from ' + file.name);
+    } catch (err) {
+      setStatus('Error reading settings: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function processImage() {
+  if (!originalImageData) return;
+
+  const bg = parseFloat(document.getElementById('bg').value);
+  const neuronMult = parseFloat(document.getElementById('neuron_mult').value);
+  const darkGreenClip = parseFloat(document.getElementById('dark_green_clip').value);
+  const darkGreenMult = parseFloat(document.getElementById('dark_green_mult').value);
+  const neuropilMult = parseFloat(document.getElementById('neuropil_mult').value);
+
+  const src = originalImageData.data; // RGBA uint8
+  const w = originalImageData.width;
+  const h = originalImageData.height;
+  const out = procCtx.createImageData(w, h);
+  const dst = out.data;
+
+  for (let i = 0; i < src.length; i += 4) {
+    const r = src[i];
+    const g = src[i + 1];
+    const b = src[i + 2];
+
+    // neuropil is the green channel; neuron is red minus green
+    const neuropil = g;
+    let neuron = r - g - bg;
+    if (neuron < 0) neuron = 0;
+
+    // Start from white, subtract neuron and neuropil contributions
+    let outR = 255 - neuron * neuronMult - neuropil * neuropilMult;
+    let outG = 255 - Math.min(neuron, darkGreenClip) * darkGreenMult - neuropil * neuropilMult;
+    let outB = 255 - neuron * neuronMult - neuropil * neuropilMult;
+
+    dst[i]     = Math.max(0, Math.min(255, outR));
+    dst[i + 1] = Math.max(0, Math.min(255, outG));
+    dst[i + 2] = Math.max(0, Math.min(255, outB));
+    dst[i + 3] = 255;
+  }
+
+  procCtx.putImageData(out, 0, 0);
+}
+
+function setZoom(z) {
+  if (z === 'fit') {
+    if (!originalImageData) return;
+    const area = document.getElementById('canvasArea');
+    const availW = (area.clientWidth - 48) / 2; // two panels side by side
+    const availH = area.clientHeight - 40;
+    fitZoom = Math.min(availW / originalImageData.width, availH / originalImageData.height, 1);
+    zoom = fitZoom;
+  } else {
+    zoom = Math.max(0.05, Math.min(10, z));
+  }
+  origCanvas.style.width = (origCanvas.width * zoom) + 'px';
+  procCanvas.style.width = (procCanvas.width * zoom) + 'px';
+  document.getElementById('zoomLabel').textContent = Math.round(zoom * 100) + '%';
+}
+
+function getStem() {
+  return sourceFileName.replace(/\.[^.]+$/, '').split('_')[0].split('-')[0];
+}
+
+function downloadBlob(blob, filename) {
+  const a = document.createElement('a');
+  a.download = filename;
+  a.href = URL.createObjectURL(blob);
+  a.click();
+}
+
+function saveFullImage() {
+  if (!originalImageData) return;
+  procCanvas.toBlob(blob => {
+    downloadBlob(blob, getStem() + '_green-neuron-white-background.png');
+    setStatus('Saved full image');
+  }, 'image/png');
+}
+
+function saveT1Image() {
+  if (!originalImageData) return;
+  // Crop matching Python: [100:412, 90:478]
+  const x = 90, y = 100, w = 478 - 90, h = 412 - 100;
+  const t1 = document.createElement('canvas');
+  t1.width = w;
+  t1.height = h;
+  t1.getContext('2d').drawImage(procCanvas, x, y, w, h, 0, 0, w, h);
+  t1.toBlob(blob => {
+    downloadBlob(blob, getStem() + '_green-neuron-white-background_T1.png');
+    setStatus('Saved T1 image');
+  }, 'image/png');
+}
+
+function saveSettings() {
+  if (!originalImageData) return;
+  const settings = {
+    source_image: sourceFileName,
+    parameters: {}
+  };
+  SLIDER_IDS.forEach(id => {
+    settings.parameters[id] = parseFloat(document.getElementById(id).value);
+  });
+  const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' });
+  downloadBlob(blob, getStem() + '_green-neuron-white-background.json');
+  setStatus('Saved settings JSON');
+}
+
+function setStatus(msg) {
+  document.getElementById('status').textContent = msg;
+}
+
+// Keyboard zoom
+document.addEventListener('keydown', e => {
+  if (e.key === '=' || e.key === '+') setZoom(zoom * 1.25);
+  if (e.key === '-') setZoom(zoom / 1.25);
+  if (e.key === '0') setZoom('fit');
+});
+</script>
+</body>
+</html>
