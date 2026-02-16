@@ -1,0 +1,1 @@
+Make me a simple html + js gui to visualize 3D vectors. I want a 3D viewer that I can rotate around using the mouse, and a box beneath to enter as many x y z vectors as I want. each one should show on the 3D view starting at the origin and pointing to the given x y z coordinate. small point at the tip of each vector. no css at all unless necessary for functionality.

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Annotator | Precision Labeling</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>Video Annotator</h1>
+            <div class="video-source-controls">
+                <input type="file" id="video-upload" accept="video/*" hidden>
+                <button onclick="document.getElementById('video-upload').click()" class="btn-primary">Upload Video</button>
+                <div class="url-input-group">
+                    <input type="text" id="video-url" placeholder="Paste video URL...">
+                    <button id="load-url-btn">Load URL</button>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <div class="video-workspace">
+                <div class="size-control">
+                    <label for="video-size">Video Scale</label>
+                    <input type="range" id="video-size" min="0.5" max="1.5" step="0.1" value="1">
+                </div>
+                
+                <div id="video-container">
+                    <video id="main-video"></video>
+                </div>
+
+                <div class="custom-video-controls">
+                    <button id="play-pause-btn" class="icon-btn">Play</button>
+                    <input type="range" id="seek-slider" value="0" min="0" step="0.1">
+                    <span id="time-display">00:00 / 00:00</span>
+                    <span id="frame-display">Frame: 0</span>
+                </div>
+            </div>
+
+            <div class="annotation-interface">
+                <section class="event-definitions">
+                    <h2>Event Types</h2>
+                    <div id="event-types-list"></div>
+                    <div class="add-event-form">
+                        <input type="text" id="new-event-name" placeholder="Event Name">
+                        <select id="new-event-type">
+                            <option value="point">Single Frame</option>
+                            <option value="range">Frame Range</option>
+                        </select>
+                        <input type="text" id="new-event-shortcut" maxlength="1" placeholder="Key">
+                        <button id="add-event-btn">+</button>
+                    </div>
+                </section>
+
+                <section class="annotations-log">
+                    <div class="section-header">
+                        <h2>Annotations</h2>
+                        <div class="io-controls">
+                            <button id="export-btn" class="btn-secondary">Export JSON</button>
+                            <input type="file" id="import-upload" accept=".json" hidden>
+                            <button onclick="document.getElementById('import-upload').click()" class="btn-secondary">Import JSON</button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table id="annotations-table">
+                            <thead>
+                                <tr>
+                                    <th>Event</th>
+                                    <th>Start (f)</th>
+                                    <th>End (f)</th>
+                                    <th>Shortcut</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="annotations-body"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

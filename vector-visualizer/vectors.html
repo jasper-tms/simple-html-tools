@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head><title>3D Vector Viewer</title></head>
+<body>
+<canvas id="c" width="700" height="500"></canvas>
+<br>
+<div id="inputs"></div>
+<button id="add">+ Add Vector</button>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const inputsDiv = document.getElementById('inputs');
+
+canvas.style.border = '1px solid #000';
+canvas.style.cursor = 'grab';
+
+let rotX = -0.5, rotY = 0.6;
+let dragging = false, lastMX, lastMY;
+let scale = 60;
+
+const vectors = [];
+const colors = ['#e6194b','#3cb44b','#4363d8','#f58231','#911eb4','#42d4f4','#f032e6','#bfef45','#fabed4','#469990','#dcbeff','#9A6324','#800000','#aaffc3','#808000','#000075'];
+
+function addRow(x, y, z) {
+    const i = vectors.length;
+    vectors.push({x: x||0, y: y||0, z: z||0});
+    const row = document.createElement('div');
+    row.dataset.idx = i;
+    const swatch = document.createElement('span');
+    swatch.style.display = 'inline-block';
+    swatch.style.width = '12px';
+    swatch.style.height = '12px';
+    swatch.style.background = colors[i % colors.length];
+    swatch.style.marginRight = '6px';
+    swatch.style.verticalAlign = 'middle';
+    row.appendChild(swatch);
+    ['x','y','z'].forEach(axis => {
+        const inp = document.createElement('input');
+        inp.type = 'number';
+        inp.step = 'any';
+        inp.value = vectors[i][axis];
+        inp.placeholder = axis;
+        inp.size = 5;
+        inp.addEventListener('input', () => {
+            vectors[i][axis] = parseFloat(inp.value) || 0;
+            draw();
+        });
+        row.appendChild(inp);
+    });
+    const rm = document.createElement('button');
+    rm.textContent = 'x';
+    rm.addEventListener('click', () => {
+        vectors.splice(i, 1);
+        rebuildInputs();
+        draw();
+    });
+    row.appendChild(rm);
+    inputsDiv.appendChild(row);
+}
+
+function rebuildInputs() {
+    const saved = vectors.map(v => ({...v}));
+    inputsDiv.innerHTML = '';
+    vectors.length = 0;
+    saved.forEach(v => addRow(v.x, v.y, v.z));
+}
+
+document.getElementById('add').addEventListener('click', () => { addRow(1,0,0); draw(); });
+
+// rotation
+function rot(px, py, pz) {
+    let x=px, y=py, z=pz;
+    // rotate around Y
+    let cosY=Math.cos(rotY), sinY=Math.sin(rotY);
+    let x2=x*cosY+z*sinY, z2=-x*sinY+z*cosY;
+    x=x2; z=z2;
+    // rotate around X
+    let cosX=Math.cos(rotX), sinX=Math.sin(rotX);
+    let y2=y*cosX-z*sinX, z3=y*sinX+z*cosX;
+    return {x, y:y2, z:z3};
+}
+
+function project(px, py, pz) {
+    const r = rot(px, py, pz);
+    const persp = 600 / (600 + r.z * scale);
+    return {
+        sx: canvas.width/2 + r.x * scale * persp,
+        sy: canvas.height/2 - r.y * scale * persp,
+        z: r.z
+    };
+}
+
+function drawLine3D(x1,y1,z1, x2,y2,z2, color, width) {
+    const a = project(x1,y1,z1);
+    const b = project(x2,y2,z2);
+    ctx.beginPath();
+    ctx.moveTo(a.sx, a.sy);
+    ctx.lineTo(b.sx, b.sy);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width || 1;
+    ctx.stroke();
+}
+
+function drawDot(x, y, z, color, radius) {
+    const p = project(x, y, z);
+    ctx.beginPath();
+    ctx.arc(p.sx, p.sy, radius || 4, 0, Math.PI*2);
+    ctx.fillStyle = color;
+    ctx.fill();
+}
+
+function drawLabel(x, y, z, text, color) {
+    const p = project(x, y, z);
+    ctx.fillStyle = color;
+    ctx.font = '13px monospace';
+    ctx.fillText(text, p.sx+4, p.sy-4);
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#f8f8f8';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // grid on XZ plane
+    ctx.globalAlpha = 0.15;
+    for (let i = -5; i <= 5; i++) {
+        drawLine3D(i, 0, -5, i, 0, 5, '#000');
+        drawLine3D(-5, 0, i, 5, 0, i, '#000');
+    }
+    ctx.globalAlpha = 1;
+
+    // axes
+    const axisLen = 5.5;
+    drawLine3D(0,0,0, axisLen,0,0, '#c00', 1.5);
+    drawLine3D(0,0,0, 0,axisLen,0, '#0a0', 1.5);
+    drawLine3D(0,0,0, 0,0,axisLen, '#00c', 1.5);
+    drawLabel(axisLen,0,0, 'X', '#c00');
+    drawLabel(0,axisLen,0, 'Y', '#0a0');
+    drawLabel(0,0,axisLen, 'Z', '#00c');
+
+    // origin dot
+    drawDot(0, 0, 0, '#000', 3);
+
+    // vectors
+    vectors.forEach((v, i) => {
+        const col = colors[i % colors.length];
+        drawLine3D(0, 0, 0, v.x, v.y, v.z, col, 2.5);
+        drawDot(v.x, v.y, v.z, col, 5);
+    });
+}
+
+// mouse rotation
+canvas.addEventListener('mousedown', e => {
+    dragging = true;
+    lastMX = e.clientX;
+    lastMY = e.clientY;
+    canvas.style.cursor = 'grabbing';
+});
+window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    rotY -= (e.clientX - lastMX) * 0.007;
+    rotX -= (e.clientY - lastMY) * 0.007;
+    rotX = Math.max(-Math.PI/2, Math.min(Math.PI/2, rotX));
+    lastMX = e.clientX;
+    lastMY = e.clientY;
+    draw();
+});
+window.addEventListener('mouseup', () => {
+    dragging = false;
+    canvas.style.cursor = 'grab';
+});
+
+// scroll to zoom
+canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    scale *= e.deltaY > 0 ? 0.92 : 1.08;
+    scale = Math.max(10, Math.min(300, scale));
+    draw();
+}, {passive: false});
+
+// start with specific vectors
+const initialVectors = [
+    [0, 1, 2], [0, 2, 1], [1, 0, 2], [2, 0, 1], [1, 2, 0], [2, 1, 0],
+    [1, 1, 2], [1, 2, 1], [2, 1, 1], [2, 2, 2]
+];
+initialVectors.forEach(([x, y, z]) => addRow(x, y, z));
+draw();
+</script>
+</body>
+</html>
