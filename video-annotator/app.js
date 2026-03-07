@@ -32,15 +32,36 @@ let state = {
 
 videoUpload.addEventListener('change', (e) => {
     const file = e.target.files[0];
-    if (file) {
-        const url = URL.createObjectURL(file);
-        video.src = url;
-    }
+    if (file) loadVideoFile(file);
 });
 
 loadUrlBtn.addEventListener('click', () => {
     if (videoUrl.value) {
         video.src = videoUrl.value;
+    }
+});
+
+// --- Drag and Drop ---
+
+function loadVideoFile(file) {
+    video.src = URL.createObjectURL(file);
+}
+
+videoContainer.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    videoContainer.classList.add('drag-over');
+});
+
+videoContainer.addEventListener('dragleave', () => {
+    videoContainer.classList.remove('drag-over');
+});
+
+videoContainer.addEventListener('drop', (e) => {
+    e.preventDefault();
+    videoContainer.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('video/')) {
+        loadVideoFile(file);
     }
 });
 
@@ -164,6 +185,18 @@ window.addEventListener('keydown', (e) => {
             }
         }
         renderAnnotations();
+    }
+
+    // Frame stepping: arrow keys and comma/period
+    if (e.key === 'ArrowLeft' || e.key === ',') {
+        e.preventDefault();
+        video.currentTime = Math.max(0, video.currentTime - 1 / FPS);
+        updateTimeDisplay();
+    }
+    if (e.key === 'ArrowRight' || e.key === '.') {
+        e.preventDefault();
+        video.currentTime = Math.min(video.duration, video.currentTime + 1 / FPS);
+        updateTimeDisplay();
     }
 
     // Space to play/pause

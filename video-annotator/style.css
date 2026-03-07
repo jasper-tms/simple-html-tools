@@ -134,6 +134,26 @@ header {
     border-radius: var(--radius);
     margin-bottom: 1rem;
     transition: transform 0.3s ease;
+    position: relative;
+}
+
+#drop-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(56, 189, 248, 0.15);
+    border: 2px dashed var(--accent);
+    border-radius: var(--radius);
+    color: var(--accent);
+    font-size: 1.25rem;
+    font-weight: 600;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+#video-container.drag-over #drop-overlay {
+    display: flex;
 }
 
 video {
@@ -149,6 +169,11 @@ video {
     background: rgba(0, 0, 0, 0.3);
     padding: 0.75rem 1.5rem;
     border-radius: var(--radius);
+}
+
+#play-pause-btn {
+    min-width: 5rem;
+    text-align: center;
 }
 
 #seek-slider {
