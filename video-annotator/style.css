@@ -181,30 +181,31 @@ video {
     cursor: pointer;
 }
 
-#time-display, #frame-display {
+#time-display {
     font-family: monospace;
     color: var(--text-secondary);
     white-space: nowrap;
 }
 
-#frame-display {
-    display: inline-block;
-    min-width: 12ch;
-    text-align: left;
-}
-
-#fps-input {
-    width: 5ch;
+#frame-input, #fps-input {
+    width: 6ch;
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid var(--border);
     border-radius: 4px;
     color: var(--text-secondary);
     font-family: monospace;
     padding: 0.2rem 0.3rem;
-    text-align: center;
+    text-align: left;
     -moz-appearance: textfield;
 }
 
+#fps-input {
+    width: 5ch;
+    text-align: center;
+}
+
+#frame-input::-webkit-inner-spin-button,
+#frame-input::-webkit-outer-spin-button,
 #fps-input::-webkit-inner-spin-button,
 #fps-input::-webkit-outer-spin-button {
     -webkit-appearance: none;

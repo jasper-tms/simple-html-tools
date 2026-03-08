@@ -8,7 +8,7 @@ const videoContainer = document.getElementById('video-container');
 const playPauseBtn = document.getElementById('play-pause-btn');
 const seekSlider = document.getElementById('seek-slider');
 const timeDisplay = document.getElementById('time-display');
-const frameDisplay = document.getElementById('frame-display');
+const frameInput = document.getElementById('frame-input');
 
 const eventTypesList = document.getElementById('event-types-list');
 const addEventBtn = document.getElementById('add-event-btn');
@@ -98,6 +98,15 @@ video.addEventListener('timeupdate', () => {
     updateTimeDisplay();
 });
 
+frameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        const frame = parseInt(frameInput.value) || 0;
+        video.currentTime = frame / getFPS();
+        frameInput.blur();
+        updateTimeDisplay();
+    }
+});
+
 seekSlider.addEventListener('mousedown', () => seekSlider._dragging = true);
 seekSlider.addEventListener('mouseup', () => seekSlider._dragging = false);
 seekSlider.addEventListener('input', () => {
@@ -114,7 +123,9 @@ function updateTimeDisplay() {
     timeDisplay.innerText = `${cur} / ${dur}`;
 
     const frame = Math.floor(video.currentTime * getFPS());
-    frameDisplay.innerText = `Frame: ${frame}`;
+    if (document.activeElement !== frameInput) {
+        frameInput.value = frame;
+    }
 }
 
 function formatTime(seconds) {
@@ -170,8 +181,7 @@ window.addEventListener('keydown', (e) => {
             state.annotations.push({
                 typeName: type.name,
                 startFrame: currentFrame,
-                endFrame: currentFrame,
-                shortcut: type.shortcut
+                endFrame: currentFrame
             });
         } else {
             // Range logic
@@ -181,8 +191,7 @@ window.addEventListener('keydown', (e) => {
                 state.annotations.push({
                     typeName: type.name,
                     startFrame: start,
-                    endFrame: currentFrame,
-                    shortcut: type.shortcut
+                    endFrame: currentFrame
                 });
                 delete state.activeRanges[type.name];
             } else {
@@ -227,7 +236,6 @@ function renderAnnotations() {
             <td onclick="jumpToFrame(${ann.startFrame})" style="cursor:pointer; color:var(--accent)">${ann.typeName}</td>
             <td>${ann.startFrame}</td>
             <td>${ann.endFrame}</td>
-            <td>${ann.shortcut}</td>
             <td>
                 <button class="btn-primary" style="padding: 2px 5px; font-size: 0.7rem;" onclick="jumpToFrame(${ann.startFrame})">Go</button>
                 <button class="btn-delete" onclick="deleteAnnotation(${state.annotations.indexOf(ann)})">del</button>
@@ -245,7 +253,6 @@ function renderAnnotations() {
         tr.innerHTML = `
             <td>${name} (Recording...)</td>
             <td>${state.activeRanges[name]}</td>
-            <td>-</td>
             <td>-</td>
             <td><button class="btn-delete" onclick="cancelRange('${name}')">cancel</button></td>
         `;
