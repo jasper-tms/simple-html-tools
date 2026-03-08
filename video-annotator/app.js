@@ -19,8 +19,11 @@ const newEventShortcut = document.getElementById('new-event-shortcut');
 const annotationsBody = document.getElementById('annotations-body');
 const exportBtn = document.getElementById('export-btn');
 const importUpload = document.getElementById('import-upload');
+const fpsInput = document.getElementById('fps-input');
 
-const FPS = 30; // Default frame rate
+function getFPS() {
+    return parseFloat(fpsInput.value) || 30;
+}
 
 let state = {
     eventTypes: [],
@@ -87,10 +90,11 @@ playPauseBtn.addEventListener('click', () => {
     }
 });
 
+video.addEventListener('ended', () => {
+    playPauseBtn.innerText = 'Play';
+});
+
 video.addEventListener('timeupdate', () => {
-    if (!seekSlider._dragging) {
-        seekSlider.value = video.currentTime;
-    }
     updateTimeDisplay();
 });
 
@@ -102,11 +106,14 @@ seekSlider.addEventListener('input', () => {
 });
 
 function updateTimeDisplay() {
+    if (!seekSlider._dragging) {
+        seekSlider.value = video.currentTime;
+    }
     const cur = formatTime(video.currentTime);
     const dur = formatTime(video.duration || 0);
     timeDisplay.innerText = `${cur} / ${dur}`;
 
-    const frame = Math.floor(video.currentTime * FPS);
+    const frame = Math.floor(video.currentTime * getFPS());
     frameDisplay.innerText = `Frame: ${frame}`;
 }
 
@@ -157,7 +164,7 @@ window.addEventListener('keydown', (e) => {
     const type = state.eventTypes.find(t => t.shortcut.toLowerCase() === key);
 
     if (type) {
-        const currentFrame = Math.floor(video.currentTime * FPS);
+        const currentFrame = Math.floor(video.currentTime * getFPS());
 
         if (type.type === 'point') {
             state.annotations.push({
@@ -190,12 +197,12 @@ window.addEventListener('keydown', (e) => {
     // Frame stepping: arrow keys and comma/period
     if (e.key === 'ArrowLeft' || e.key === ',') {
         e.preventDefault();
-        video.currentTime = Math.max(0, video.currentTime - 1 / FPS);
+        video.currentTime = Math.max(0, video.currentTime - 1 / getFPS());
         updateTimeDisplay();
     }
     if (e.key === 'ArrowRight' || e.key === '.') {
         e.preventDefault();
-        video.currentTime = Math.min(video.duration, video.currentTime + 1 / FPS);
+        video.currentTime = Math.min(video.duration, video.currentTime + 1 / getFPS());
         updateTimeDisplay();
     }
 
@@ -247,7 +254,7 @@ function renderAnnotations() {
 }
 
 window.jumpToFrame = (frame) => {
-    video.currentTime = frame / FPS;
+    video.currentTime = frame / getFPS();
 };
 
 window.cancelRange = (name) => {

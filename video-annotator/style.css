@@ -187,6 +187,30 @@ video {
     white-space: nowrap;
 }
 
+#frame-display {
+    display: inline-block;
+    min-width: 12ch;
+    text-align: left;
+}
+
+#fps-input {
+    width: 5ch;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-family: monospace;
+    padding: 0.2rem 0.3rem;
+    text-align: center;
+    -moz-appearance: textfield;
+}
+
+#fps-input::-webkit-inner-spin-button,
+#fps-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
 /* Annotation Interface */
 .annotation-interface {
     display: grid;
