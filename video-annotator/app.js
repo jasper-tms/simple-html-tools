@@ -277,7 +277,20 @@ window.deleteAnnotation = (index) => {
 // --- Export / Import ---
 
 exportBtn.addEventListener('click', () => {
-    const data = JSON.stringify(state, null, 2);
+    if (state.annotations.length === 0) {
+        exportBtn.textContent = 'No annotations to export';
+        exportBtn.style.background = '#a05252';
+        exportBtn.style.color = '#fff';
+        setTimeout(() => {
+            exportBtn.textContent = 'Export JSON';
+            exportBtn.style.background = '';
+            exportBtn.style.color = '';
+        }, 1000);
+        return;
+    }
+    const exportData = { ...state, fps: getFPS() };
+    delete exportData.activeRanges;
+    const data = JSON.stringify(exportData, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -286,17 +299,15 @@ exportBtn.addEventListener('click', () => {
     a.click();
 });
 
-importUpload.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
+function importJsonFile(file) {
     const reader = new FileReader();
     reader.onload = (event) => {
         try {
             const imported = JSON.parse(event.target.result);
             if (imported.eventTypes && imported.annotations) {
+                if (imported.fps) fpsInput.value = imported.fps;
                 state = imported;
-                state.activeRanges = {}; // Reset active ranges on import
+                state.activeRanges = {};
                 renderEventTypes();
                 renderAnnotations();
             }
@@ -305,4 +316,29 @@ importUpload.addEventListener('change', (e) => {
         }
     };
     reader.readAsText(file);
+}
+
+importUpload.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) importJsonFile(file);
+});
+
+const annotationsSection = document.querySelector('.annotations-log');
+
+annotationsSection.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    annotationsSection.style.outline = '2px dashed var(--accent)';
+});
+
+annotationsSection.addEventListener('dragleave', () => {
+    annotationsSection.style.outline = '';
+});
+
+annotationsSection.addEventListener('drop', (e) => {
+    e.preventDefault();
+    annotationsSection.style.outline = '';
+    const file = e.dataTransfer.files[0];
+    if (file && file.name.endsWith('.json')) {
+        importJsonFile(file);
+    }
 });
