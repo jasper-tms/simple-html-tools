@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QR Code Reader</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: system-ui, sans-serif;
+    background: #f5f5f5;
+    color: #222;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem;
+    gap: 1.5rem;
+  }
+
+  h1 { font-size: 1.5rem; font-weight: 600; }
+
+  #drop-zone {
+    width: 100%;
+    max-width: 640px;
+    border: 2px dashed #aaa;
+    border-radius: 12px;
+    padding: 3rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    background: #fff;
+    transition: border-color 0.2s, background 0.2s;
+  }
+
+  #drop-zone.drag-over {
+    border-color: #4f8ef7;
+    background: #eef4ff;
+  }
+
+  #drop-zone p { color: #666; margin-top: 0.5rem; font-size: 0.9rem; }
+
+  #open-btn {
+    display: inline-block;
+    margin-top: 1rem;
+    padding: 0.5rem 1.25rem;
+    background: #4f8ef7;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+  #open-btn:hover { background: #3a7de0; }
+
+  #file-input { display: none; }
+
+  #status {
+    font-size: 0.9rem;
+    color: #555;
+    min-height: 1.2em;
+  }
+
+  #results-section { width: 100%; max-width: 860px; }
+  #results-section h2 { font-size: 1.1rem; margin-bottom: 0.75rem; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+
+  th {
+    background: #f0f0f0;
+    text-align: left;
+    padding: 0.6rem 1rem;
+    font-size: 0.85rem;
+    color: #444;
+    border-bottom: 1px solid #ddd;
+  }
+
+  td {
+    padding: 0.6rem 1rem;
+    font-size: 0.9rem;
+    border-bottom: 1px solid #eee;
+    word-break: break-all;
+    vertical-align: top;
+  }
+
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #fafafa; }
+
+  td a { color: #4f8ef7; text-decoration: none; }
+  td a:hover { text-decoration: underline; }
+
+  .no-results { color: #888; font-size: 0.9rem; margin-top: 0.5rem; }
+
+  #scratch { display: none; }
+</style>
+</head>
+<body>
+
+<h1>QR Code Reader</h1>
+
+<div id="drop-zone">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+    <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/>
+    <rect x="19" y="14" width="2" height="2"/><rect x="14" y="19" width="2" height="2"/>
+    <rect x="19" y="19" width="2" height="2"/>
+  </svg>
+  <p>Drag &amp; drop an image or PDF here, or paste a screenshot (Ctrl+V / Cmd+V)</p>
+  <button id="open-btn">Open file</button>
+  <input type="file" id="file-input" accept="image/*,.pdf">
+</div>
+
+<div id="status"></div>
+
+<div id="results-section" style="display:none">
+  <h2>Results</h2>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Page / Source</th><th>Decoded content</th></tr>
+    </thead>
+    <tbody id="results-body"></tbody>
+  </table>
+  <p class="no-results" id="no-results" style="display:none">No QR codes found.</p>
+</div>
+
+<!-- scratch canvas, hidden -->
+<canvas id="scratch"></canvas>
+
+<!-- jsQR fallback (loaded async, non-blocking) -->
+<script>
+(function() {
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+  s.async = true;
+  document.head.appendChild(s);
+})();
+</script>
+
+<script>
+'use strict';
+
+const dropZone      = document.getElementById('drop-zone');
+const fileInput     = document.getElementById('file-input');
+const openBtn       = document.getElementById('open-btn');
+const statusEl      = document.getElementById('status');
+const resultsSection= document.getElementById('results-section');
+const resultsBody   = document.getElementById('results-body');
+const noResults     = document.getElementById('no-results');
+const scratch       = document.getElementById('scratch');
+const scratchCtx    = scratch.getContext('2d');
+
+// ── UI events ────────────────────────────────────────────────────────────────
+
+openBtn.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) processFile(fileInput.files[0]);
+});
+
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file);
+});
+
+document.addEventListener('paste', e => {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      const blob = item.getAsFile();
+      if (blob) processFile(blob);
+      break;
+    }
+  }
+});
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function setStatus(msg) { statusEl.textContent = msg; }
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function isUrl(str) {
+  try {
+    const u = new URL(str);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch { return false; }
+}
+
+let rowCount = 0;
+
+function resetResults() {
+  resultsBody.innerHTML = '';
+  noResults.style.display = 'none';
+  resultsSection.style.display = 'none';
+  rowCount = 0;
+}
+
+function addRow(source, content) {
+  rowCount++;
+  const tr = document.createElement('tr');
+  const cell = isUrl(content)
+    ? `<a href="${escHtml(content)}" target="_blank" rel="noopener noreferrer">${escHtml(content)}</a>`
+    : escHtml(content);
+  tr.innerHTML = `<td>${rowCount}</td><td>${escHtml(source)}</td><td>${cell}</td>`;
+  resultsBody.appendChild(tr);
+}
+
+function finalise() {
+  resultsSection.style.display = '';
+  if (rowCount === 0) {
+    noResults.style.display = '';
+    setStatus('Done. No QR codes found.');
+  } else {
+    setStatus(`Done. Found ${rowCount} QR code${rowCount !== 1 ? 's' : ''}.`);
+  }
+}
+
+// ── QR scanning (BarcodeDetector → jsQR fallback) ────────────────────────────
+
+// Returns array of decoded strings from whatever is currently on the scratch canvas.
+async function scanScratchCanvas(label) {
+  const found = [];
+
+  // 1. Try native BarcodeDetector (Chrome/Edge, no CDN required)
+  if ('BarcodeDetector' in window) {
+    try {
+      const detector = new BarcodeDetector({ formats: ['qr_code'] });
+      const blob = await new Promise(res => scratch.toBlob(res));
+      const codes = await detector.detect(blob);
+      for (const c of codes) found.push(c.rawValue);
+      if (found.length) return found;
+    } catch (e) {
+      console.warn('BarcodeDetector failed, trying jsQR:', e);
+    }
+  }
+
+  // 2. Fall back to jsQR
+  if (typeof jsQR !== 'function') {
+    console.warn('jsQR not loaded yet');
+    return found;
+  }
+  const imageData = scratchCtx.getImageData(0, 0, scratch.width, scratch.height);
+  const result = jsQR(imageData.data, imageData.width, imageData.height, {
+    inversionAttempts: 'attemptBoth',
+  });
+  if (result) found.push(result.data);
+  return found;
+}
+
+// Draw an image/video/canvas source onto the scratch canvas.
+async function drawToScratch(source) {
+  if (source instanceof Blob) {
+    const url = URL.createObjectURL(source);
+    try {
+      const img = new Image();
+      await new Promise((res, rej) => {
+        img.onload = res;
+        img.onerror = rej;
+        img.src = url;
+      });
+      scratch.width  = img.naturalWidth;
+      scratch.height = img.naturalHeight;
+      scratchCtx.drawImage(img, 0, 0);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  } else {
+    // ImageBitmap, HTMLCanvasElement, etc.
+    scratch.width  = source.width;
+    scratch.height = source.height;
+    scratchCtx.drawImage(source, 0, 0);
+  }
+}
+
+// ── File processing ───────────────────────────────────────────────────────────
+
+async function processFile(file) {
+  resetResults();
+  setStatus('Reading file…');
+
+  const name = file.name || 'Pasted image';
+  const isPdf = file.type === 'application/pdf' ||
+                (file.name && file.name.toLowerCase().endsWith('.pdf'));
+  try {
+    if (isPdf) {
+      await processPdf(file);
+    } else {
+      await drawToScratch(file);
+      const codes = await scanScratchCanvas(name);
+      for (const c of codes) addRow(name, c);
+    }
+  } catch (e) {
+    setStatus('Error: ' + e.message);
+    console.error(e);
+    return;
+  }
+  finalise();
+}
+
+async function processPdf(file) {
+  // Load pdf.js lazily so a CDN failure doesn't break the image workflow.
+  let pdfjsLib = window['pdfjs-dist/build/pdf'];
+  if (!pdfjsLib) {
+    setStatus('Loading PDF library…');
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      s.onload = res;
+      s.onerror = () => rej(new Error('Failed to load pdf.js from CDN'));
+      document.head.appendChild(s);
+    });
+    pdfjsLib = window['pdfjs-dist/build/pdf'];
+  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const total = pdf.numPages;
+
+  for (let n = 1; n <= total; n++) {
+    setStatus(`Scanning page ${n} of ${total}…`);
+    const page = await pdf.getPage(n);
+    const viewport = page.getViewport({ scale: 2 });
+    scratch.width  = viewport.width;
+    scratch.height = viewport.height;
+    await page.render({ canvasContext: scratchCtx, viewport }).promise;
+    const label = `Page ${n}`;
+    const codes = await scanScratchCanvas(label);
+    for (const c of codes) addRow(label, c);
+  }
+}
+</script>
+</body>
+</html>
