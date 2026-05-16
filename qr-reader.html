@@ -114,7 +114,7 @@
   </svg>
   <p>Drag &amp; drop an image or PDF here, or paste a screenshot (Ctrl+V / Cmd+V)</p>
   <button id="open-btn">Open file</button>
-  <input type="file" id="file-input" accept="image/*,.pdf">
+  <input type="file" id="file-input" accept="image/*,.pdf,.heic,.heif">
 </div>
 
 <div id="status"></div>
@@ -293,6 +293,13 @@ async function drawToScratch(source) {
 
 // ── File processing ───────────────────────────────────────────────────────────
 
+function isHeic(file) {
+  const t = (file.type || '').toLowerCase();
+  const n = (file.name || '').toLowerCase();
+  return t === 'image/heic' || t === 'image/heif'
+      || n.endsWith('.heic') || n.endsWith('.heif');
+}
+
 async function processFile(file) {
   resetResults();
   setStatus('Reading file…');
@@ -304,7 +311,15 @@ async function processFile(file) {
     if (isPdf) {
       await processPdf(file);
     } else {
-      await drawToScratch(file);
+      try {
+        await drawToScratch(file);
+      } catch (e) {
+        if (isHeic(file)) {
+          setStatus('HEIC file not readable by this browser — try again in Safari.');
+          return;
+        }
+        throw e;
+      }
       const codes = await scanScratchCanvas(name);
       for (const c of codes) addRow(name, c);
     }
