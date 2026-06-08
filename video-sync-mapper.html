@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video Sync Mapper</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: system-ui, sans-serif;
+    background: #16181d;
+    color: #e6e8ec;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1.25rem;
+    gap: 1rem;
+  }
+
+  h1 { font-size: 1.4rem; font-weight: 600; }
+
+  .hint {
+    max-width: 960px;
+    text-align: center;
+    font-size: 0.85rem;
+    color: #a0a4ad;
+    line-height: 1.45;
+  }
+  .hint strong { color: #cdd1d9; }
+
+  .loaders {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+  }
+
+  button, label.button {
+    padding: 0.4rem 0.9rem;
+    background: #4f8ef7;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  button:hover, label.button:hover { background: #3a7de0; }
+  button.secondary, label.button.secondary { background: #4a4f5a; }
+  button.secondary:hover, label.button.secondary:hover { background: #5a606c; }
+  button:disabled { background: #3a3d44; color: #80848c; cursor: not-allowed; }
+
+  input[type="file"] { display: none; }
+
+  .videos {
+    display: flex;
+    gap: 0.75rem;
+    width: 100%;
+    max-width: 1500px;
+  }
+
+  .panel {
+    flex: 1 1 0;
+    min-width: 0;
+    background: #1f2229;
+    border: 1px solid #30343d;
+    border-radius: 10px;
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .panel-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .panel.driven .panel-title::after {
+    content: "driven by mapping";
+    font-size: 0.7rem;
+    font-weight: 400;
+    color: #8db8ff;
+    background: #243049;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+  }
+
+  video {
+    width: 100%;
+    background: #000;
+    border-radius: 6px;
+    aspect-ratio: 16 / 9;
+    object-fit: contain;
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+
+  .seek { width: 100%; }
+
+  .time-input {
+    width: 7rem;
+    font-family: ui-monospace, monospace;
+    font-size: 0.85rem;
+    padding: 0.25rem 0.4rem;
+    border: 1px solid #3a3f49;
+    border-radius: 4px;
+    text-align: right;
+    background: #14161a;
+    color: #e6e8ec;
+  }
+
+  .nudge {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+    background: #3a3f49;
+    color: #e6e8ec;
+    border-radius: 4px;
+  }
+  .nudge:hover { background: #474d59; }
+
+  .muted { color: #8b8f99; font-size: 0.8rem; line-height: 1.4; }
+  .secs { color: #8b8f99; font-size: 0.8rem; }
+
+  .panel[disabled-controls] .seek,
+  .panel[disabled-controls] .time-input { opacity: 0.5; pointer-events: none; }
+
+  /* Mapping + calibration controls */
+  .controls {
+    width: 100%;
+    max-width: 1500px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .card {
+    flex: 1 1 340px;
+    background: #1f2229;
+    border: 1px solid #30343d;
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .card h2 { font-size: 1rem; font-weight: 600; }
+
+  .param-grid {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 0.4rem 0.5rem;
+    align-items: center;
+  }
+  .param-grid .head {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #9aa0ab;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .param-grid .side-label { font-size: 0.9rem; font-weight: 600; }
+  .param-grid input[type="number"] {
+    width: 100%;
+    font-family: ui-monospace, monospace;
+    font-size: 0.88rem;
+    padding: 0.3rem 0.45rem;
+    border: 1px solid #3a3f49;
+    border-radius: 4px;
+    text-align: right;
+    background: #14161a;
+    color: #e6e8ec;
+  }
+  .nudge-pair { display: flex; gap: 0.25rem; }
+  .nudge-pair .nudge { padding: 0.25rem 0.4rem; }
+
+  .formula {
+    font-family: ui-monospace, monospace;
+    font-size: 0.9rem;
+    background: #1a2436;
+    border: 1px solid #2c3a52;
+    border-radius: 6px;
+    padding: 0.55rem 0.7rem;
+    word-break: break-word;
+    cursor: pointer;
+    color: #cfe0ff;
+  }
+  .formula:hover { background: #213049; }
+  .formula small { display: block; color: #8b93a3; font-size: 0.75rem; margin-top: 0.25rem; }
+
+  .points { font-size: 0.85rem; font-family: ui-monospace, monospace; color: #c2c6cf; }
+  .points div { padding: 0.1rem 0; }
+
+  .toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 0.95rem; }
+  .toggle input { width: 1.1rem; height: 1.1rem; }
+
+  kbd {
+    font-family: ui-monospace, monospace;
+    background: #2a2e36;
+    border: 1px solid #444954;
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 0 0.3rem;
+    font-size: 0.8rem;
+    color: #d6d9df;
+  }
+</style>
+</head>
+<body>
+  <h1>Video Sync Mapper</h1>
+  <p class="hint">
+    Load a video into each side and find the linear time mapping that lines them up. The two clips can be
+    different files, or the same file loaded twice (for example to sync two play-throughs of one scene).
+    Describe each side with a <strong>t0</strong> (a timestamp where a chosen shared moment appears)
+    and a <strong>playback rate</strong>. The sides then map onto each other by
+    <strong>t_right = t0_right + (rate_right / rate_left) &middot; (t_left &minus; t0_left)</strong>.
+    Tune the numbers by hand while linked, or unlink, line up two matching moments, and let the
+    calibration solve them. Click a focused video and use <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> to nudge
+    (hold <kbd>Shift</kbd> for a bigger step).
+  </p>
+
+  <div class="loaders">
+    <label class="button secondary" for="left-input">Load left video</label>
+    <input type="file" id="left-input" accept="video/*">
+    <label class="button secondary" for="right-input">Load right video</label>
+    <input type="file" id="right-input" accept="video/*">
+    <label class="button" for="both-input">Load same video into both</label>
+    <input type="file" id="both-input" accept="video/*">
+  </div>
+
+  <div class="videos">
+    <div class="panel" id="left-panel">
+      <div class="panel-title"><span>Left clip</span></div>
+      <video id="left-video" tabindex="0" playsinline></video>
+      <input type="range" class="seek" id="left-seek" min="0" max="0" step="0.001" value="0">
+      <div class="row">
+        <button class="nudge" data-side="left" data-step="-0.5">&#9664;&#9664;</button>
+        <button class="nudge" data-side="left" data-step="-0.0333">&#9664;</button>
+        <button id="left-play" class="nudge" style="min-width:4.5rem">Play</button>
+        <button class="nudge" data-side="left" data-step="0.0333">&#9654;</button>
+        <button class="nudge" data-side="left" data-step="0.5">&#9654;&#9654;</button>
+        <input type="number" class="time-input" id="left-time" step="0.001" min="0" value="0">
+        <span class="secs">s</span>
+        <button class="nudge" data-jump-t0="left" title="Jump this video to its t0">&rarr; t0</button>
+      </div>
+    </div>
+
+    <div class="panel" id="right-panel">
+      <div class="panel-title"><span>Right clip</span></div>
+      <video id="right-video" tabindex="0" playsinline></video>
+      <input type="range" class="seek" id="right-seek" min="0" max="0" step="0.001" value="0">
+      <div class="row">
+        <button class="nudge" data-side="right" data-step="-0.5">&#9664;&#9664;</button>
+        <button class="nudge" data-side="right" data-step="-0.0333">&#9664;</button>
+        <button id="right-play" class="nudge" style="min-width:4.5rem">Play</button>
+        <button class="nudge" data-side="right" data-step="0.0333">&#9654;</button>
+        <button class="nudge" data-side="right" data-step="0.5">&#9654;&#9654;</button>
+        <input type="number" class="time-input" id="right-time" step="0.001" min="0" value="0">
+        <span class="secs">s</span>
+        <button class="nudge" data-jump-t0="right" title="Jump this video to its t0">&rarr; t0</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="card">
+      <h2>Mapping parameters</h2>
+      <label class="toggle">
+        <input type="checkbox" id="link-toggle" checked>
+        Link right to left (right follows the mapping)
+      </label>
+      <div class="param-grid">
+        <span class="head"></span>
+        <span class="head">t0 (s)</span>
+        <span class="head">rate</span>
+
+        <span class="side-label">Left</span>
+        <div class="row" style="gap:0.25rem">
+          <input type="number" id="t0-left" step="0.001" value="0">
+          <button class="nudge" data-set-t0="left" title="Set to current left time">set</button>
+        </div>
+        <div class="row" style="gap:0.25rem">
+          <input type="number" id="rate-left" step="0.001" value="1">
+          <span class="nudge-pair">
+            <button class="nudge" data-target="rate-left" data-step="-0.01">&minus;</button>
+            <button class="nudge" data-target="rate-left" data-step="0.01">+</button>
+          </span>
+        </div>
+
+        <span class="side-label">Right</span>
+        <div class="row" style="gap:0.25rem">
+          <input type="number" id="t0-right" step="0.001" value="0">
+          <button class="nudge" data-set-t0="right" title="Set to current right time">set</button>
+        </div>
+        <div class="row" style="gap:0.25rem">
+          <input type="number" id="rate-right" step="0.001" value="1">
+          <span class="nudge-pair">
+            <button class="nudge" data-target="rate-right" data-step="-0.01">&minus;</button>
+            <button class="nudge" data-target="rate-right" data-step="0.01">+</button>
+          </span>
+        </div>
+      </div>
+      <div class="row">
+        <button class="secondary" id="jump-both-t0">Jump both to t0</button>
+      </div>
+      <p class="muted">
+        "set" stores the current playback position as that video's t0. Rates may be any nonzero value;
+        only positive rates between 0.0625 and 16 play back smoothly, but the mapping math accepts any value.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>Two-point calibration</h2>
+      <p class="muted">
+        Uncheck "Link", align each video on the <em>same</em> shared moment, and capture a reference point
+        (this sets both t0 values). Then align on a <em>second</em> shared moment and capture it.
+        "Solve rates" keeps the left rate fixed and computes the right rate so both points line up.
+      </p>
+      <div class="row">
+        <button class="secondary" id="capture-reference">Capture reference (t0)</button>
+        <button class="secondary" id="capture-second">Capture 2nd point</button>
+        <button id="solve">Solve rates</button>
+        <button class="secondary" id="clear-points">Clear</button>
+      </div>
+      <div class="points" id="points-display"></div>
+    </div>
+
+    <div class="card">
+      <h2>Result</h2>
+      <div class="formula" id="formula" title="Click to copy"></div>
+      <div class="formula" id="inverse-formula" title="Click to copy"></div>
+      <p class="muted">Click a formula to copy it to the clipboard.</p>
+    </div>
+  </div>
+
+<script>
+"use strict";
+
+const leftVideo = document.getElementById("left-video");
+const rightVideo = document.getElementById("right-video");
+const leftSeek = document.getElementById("left-seek");
+const rightSeek = document.getElementById("right-seek");
+const leftTime = document.getElementById("left-time");
+const rightTime = document.getElementById("right-time");
+const leftPlay = document.getElementById("left-play");
+const rightPlay = document.getElementById("right-play");
+const rightPanel = document.getElementById("right-panel");
+const linkToggle = document.getElementById("link-toggle");
+const formulaBox = document.getElementById("formula");
+const inverseBox = document.getElementById("inverse-formula");
+const pointsDisplay = document.getElementById("points-display");
+
+const t0LeftInput = document.getElementById("t0-left");
+const t0RightInput = document.getElementById("t0-right");
+const rateLeftInput = document.getElementById("rate-left");
+const rateRightInput = document.getElementById("rate-right");
+
+const sides = {
+  left: { video: leftVideo, seek: leftSeek, time: leftTime, play: leftPlay },
+  right: { video: rightVideo, seek: rightSeek, time: rightTime, play: rightPlay },
+};
+
+// Reference point captured for calibration, and the second matching point.
+let referencePoint = null;
+let secondPoint = null;
+
+const SYNC_TOLERANCE = 0.06; // seconds of drift before we re-seek the driven video
+const PLAYBACK_RATE_MIN = 0.0625;
+const PLAYBACK_RATE_MAX = 16;
+
+function readNumber(input, fallback) {
+  const value = parseFloat(input.value);
+  return Number.isFinite(value) ? value : fallback;
+}
+function getT0Left() { return readNumber(t0LeftInput, 0); }
+function getT0Right() { return readNumber(t0RightInput, 0); }
+function getRateLeft() {
+  const value = readNumber(rateLeftInput, 1);
+  return value === 0 ? 1 : value;
+}
+function getRateRight() {
+  const value = readNumber(rateRightInput, 1);
+  return value === 0 ? 1 : value;
+}
+function isLinked() { return linkToggle.checked; }
+function clamp(value, low, high) { return Math.min(Math.max(value, low), high); }
+
+// Effective linear coefficients implied by the four parameters.
+function mappingScale() { return getRateRight() / getRateLeft(); }
+function mappingOffset() { return getT0Right() - mappingScale() * getT0Left(); }
+function mapLeftToRight(leftSeconds) {
+  return getT0Right() + mappingScale() * (leftSeconds - getT0Left());
+}
+
+// --- Loading videos ---------------------------------------------------------
+
+function loadInto(video, file) {
+  if (!file) return;
+  if (video.dataset.objectUrl) URL.revokeObjectURL(video.dataset.objectUrl);
+  const url = URL.createObjectURL(file);
+  video.dataset.objectUrl = url;
+  video.src = url;
+  video.load();
+}
+
+document.getElementById("both-input").addEventListener("change", (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  // Load the same file into each element separately so they seek independently.
+  loadInto(leftVideo, file);
+  loadInto(rightVideo, file);
+});
+document.getElementById("left-input").addEventListener("change", (event) => {
+  loadInto(leftVideo, event.target.files[0]);
+});
+document.getElementById("right-input").addEventListener("change", (event) => {
+  loadInto(rightVideo, event.target.files[0]);
+});
+
+for (const side of Object.values(sides)) {
+  side.video.addEventListener("loadedmetadata", () => {
+    side.seek.max = side.video.duration || 0;
+    side.time.max = side.video.duration || 0;
+  });
+}
+
+// --- Per-side manual controls ----------------------------------------------
+
+function rightControlsDisabled() {
+  // The right video is driven by the mapping when linked, so block manual control.
+  return isLinked();
+}
+
+function applyDrivenState() {
+  if (rightControlsDisabled()) {
+    rightPanel.classList.add("driven");
+    rightPanel.setAttribute("disabled-controls", "");
+    rightPlay.disabled = true;
+  } else {
+    rightPanel.classList.remove("driven");
+    rightPanel.removeAttribute("disabled-controls");
+    rightPlay.disabled = false;
+  }
+}
+linkToggle.addEventListener("change", applyDrivenState);
+
+// Seek sliders
+leftSeek.addEventListener("input", () => { leftVideo.currentTime = parseFloat(leftSeek.value); });
+rightSeek.addEventListener("input", () => {
+  if (rightControlsDisabled()) return;
+  rightVideo.currentTime = parseFloat(rightSeek.value);
+});
+
+// Editable numeric time boxes
+leftTime.addEventListener("change", () => {
+  const value = parseFloat(leftTime.value);
+  if (Number.isFinite(value)) leftVideo.currentTime = clamp(value, 0, leftVideo.duration || value);
+});
+rightTime.addEventListener("change", () => {
+  if (rightControlsDisabled()) return;
+  const value = parseFloat(rightTime.value);
+  if (Number.isFinite(value)) rightVideo.currentTime = clamp(value, 0, rightVideo.duration || value);
+});
+
+// Nudge buttons (per side)
+for (const button of document.querySelectorAll(".nudge[data-side]")) {
+  button.addEventListener("click", () => {
+    nudgeSide(button.dataset.side, parseFloat(button.dataset.step));
+  });
+}
+function nudgeSide(side, step) {
+  if (side === "right" && rightControlsDisabled()) return;
+  const video = sides[side].video;
+  video.currentTime = clamp(video.currentTime + step, 0, video.duration || video.currentTime + step);
+}
+
+// Arrow-key nudging while a video element is focused
+for (const [name, side] of Object.entries(sides)) {
+  side.video.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const base = event.shiftKey ? 0.5 : 0.0333;
+    nudgeSide(name, event.key === "ArrowRight" ? base : -base);
+  });
+}
+
+// Play / pause buttons
+leftPlay.addEventListener("click", () => togglePlay(leftVideo));
+rightPlay.addEventListener("click", () => { if (!rightControlsDisabled()) togglePlay(rightVideo); });
+function togglePlay(video) {
+  if (video.paused) video.play().catch(() => {}); else video.pause();
+}
+leftVideo.addEventListener("play", () => { leftPlay.textContent = "Pause"; });
+leftVideo.addEventListener("pause", () => { leftPlay.textContent = "Play"; });
+rightVideo.addEventListener("play", () => { rightPlay.textContent = "Pause"; });
+rightVideo.addEventListener("pause", () => { rightPlay.textContent = "Play"; });
+
+// When linked, playing/pausing the left drives the right's playback state too.
+leftVideo.addEventListener("play", () => {
+  if (isLinked() && getRateRight() > 0) rightVideo.play().catch(() => {});
+});
+leftVideo.addEventListener("pause", () => {
+  if (isLinked()) rightVideo.pause();
+});
+
+// --- Mapping parameter controls --------------------------------------------
+
+for (const button of document.querySelectorAll(".nudge[data-target]")) {
+  button.addEventListener("click", () => {
+    const input = document.getElementById(button.dataset.target);
+    const step = parseFloat(button.dataset.step);
+    const current = parseFloat(input.value) || 0;
+    input.value = (current + step).toFixed(3);
+    updateFormula();
+  });
+}
+for (const button of document.querySelectorAll(".nudge[data-set-t0]")) {
+  button.addEventListener("click", () => {
+    const side = button.dataset.setT0;
+    const input = side === "left" ? t0LeftInput : t0RightInput;
+    input.value = sides[side].video.currentTime.toFixed(3);
+    updateFormula();
+  });
+}
+for (const input of [t0LeftInput, t0RightInput, rateLeftInput, rateRightInput]) {
+  input.addEventListener("input", updateFormula);
+}
+
+// Jump a video to its stored t0.
+function jumpToT0(side) {
+  const video = sides[side].video;
+  const t0 = side === "left" ? getT0Left() : getT0Right();
+  video.currentTime = clamp(t0, 0, video.duration || t0);
+}
+for (const button of document.querySelectorAll(".nudge[data-jump-t0]")) {
+  button.addEventListener("click", () => {
+    const side = button.dataset.jumpT0;
+    // When linked, the right video is driven by the mapping, so jumping the left
+    // to its t0 already brings the right to t0_right; a manual right jump would be
+    // overwritten next frame, so ignore it (mirrors the other right-side controls).
+    if (side === "right" && rightControlsDisabled()) return;
+    jumpToT0(side);
+  });
+}
+document.getElementById("jump-both-t0").addEventListener("click", () => {
+  jumpToT0("left");
+  // When linked, the mapping drives the right to t0_right automatically.
+  if (!rightControlsDisabled()) jumpToT0("right");
+});
+
+// --- Continuous sync loop ---------------------------------------------------
+
+function formatSeconds(value) {
+  return (Number.isFinite(value) ? value : 0).toFixed(3);
+}
+
+function applyPlaybackRate(video, rate) {
+  // The media element only accepts a positive rate within a limited range.
+  if (rate > 0 && Number.isFinite(rate)) {
+    try { video.playbackRate = clamp(rate, PLAYBACK_RATE_MIN, PLAYBACK_RATE_MAX); } catch (error) {}
+  }
+}
+
+function syncFrame() {
+  // Reflect each video's time into its slider and time box (unless being typed in).
+  for (const side of Object.values(sides)) {
+    const current = side.video.currentTime;
+    if (document.activeElement !== side.seek) side.seek.value = current;
+    if (document.activeElement !== side.time) side.time.value = formatSeconds(current);
+  }
+
+  // Drive the right video from the left when linked.
+  if (isLinked()) {
+    // Each video plays at its own rate so they advance through the shared timeline together.
+    applyPlaybackRate(leftVideo, getRateLeft());
+    applyPlaybackRate(rightVideo, getRateRight());
+    const desired = clamp(mapLeftToRight(leftVideo.currentTime), 0, rightVideo.duration || Infinity);
+    if (Math.abs(rightVideo.currentTime - desired) > SYNC_TOLERANCE) {
+      rightVideo.currentTime = desired;
+    }
+  }
+
+  requestAnimationFrame(syncFrame);
+}
+requestAnimationFrame(syncFrame);
+
+// --- Two-point calibration --------------------------------------------------
+
+function renderPoints() {
+  const describe = (label, point) => point
+    ? `<div>${label}: t_left = ${point.left.toFixed(3)}, t_right = ${point.right.toFixed(3)}</div>`
+    : `<div>${label}: &mdash;</div>`;
+  pointsDisplay.innerHTML =
+    describe("Reference (t0)", referencePoint) + describe("2nd point", secondPoint);
+}
+
+document.getElementById("capture-reference").addEventListener("click", () => {
+  referencePoint = { left: leftVideo.currentTime, right: rightVideo.currentTime };
+  // The reference moment defines both t0 values directly.
+  t0LeftInput.value = referencePoint.left.toFixed(3);
+  t0RightInput.value = referencePoint.right.toFixed(3);
+  updateFormula();
+  renderPoints();
+});
+document.getElementById("capture-second").addEventListener("click", () => {
+  secondPoint = { left: leftVideo.currentTime, right: rightVideo.currentTime };
+  renderPoints();
+});
+document.getElementById("clear-points").addEventListener("click", () => {
+  referencePoint = null;
+  secondPoint = null;
+  renderPoints();
+});
+
+document.getElementById("solve").addEventListener("click", () => {
+  if (!referencePoint || !secondPoint) {
+    alert("Capture both the reference point and a 2nd point first (with the videos unlinked).");
+    return;
+  }
+  const deltaLeft = secondPoint.left - referencePoint.left;
+  if (Math.abs(deltaLeft) < 1e-6) {
+    alert("The two points have nearly the same left time — pick points further apart.");
+    return;
+  }
+  // Keep the left rate as chosen; solve the right rate so both points map exactly.
+  // rate_right = rate_left * (t_right2 - t_right1) / (t_left2 - t_left1)
+  const rateRight = getRateLeft() * (secondPoint.right - referencePoint.right) / deltaLeft;
+  rateRightInput.value = rateRight.toFixed(4);
+  // Ensure the reference defines t0 for an exact fit.
+  t0LeftInput.value = referencePoint.left.toFixed(3);
+  t0RightInput.value = referencePoint.right.toFixed(3);
+  updateFormula();
+});
+
+// --- Result formula ---------------------------------------------------------
+
+function trimNumber(value, decimals) {
+  return parseFloat(value.toFixed(decimals)).toString();
+}
+
+function updateFormula() {
+  const scale = mappingScale();
+  const offset = mappingOffset();
+  const scaleText = trimNumber(scale, 5);
+  const offsetText = trimNumber(Math.abs(offset), 4);
+  const offsetSign = offset >= 0 ? "+" : "−";
+  const offsetSignPlain = offset >= 0 ? "+" : "-";
+
+  formulaBox.dataset.copy = `t_right = ${scaleText} * t_left ${offsetSignPlain} ${offsetText}`;
+  formulaBox.innerHTML =
+    `t_right = ${scaleText} &middot; t_left ${offsetSign} ${offsetText}` +
+    `<small>t0_left = ${trimNumber(getT0Left(), 4)} s, t0_right = ${trimNumber(getT0Right(), 4)} s, ` +
+    `rate_left = ${trimNumber(getRateLeft(), 5)}, rate_right = ${trimNumber(getRateRight(), 5)}</small>`;
+
+  // Inverse: t_left = t0_left + (t_right - t0_right) / scale
+  const invScaleText = trimNumber(1 / scale, 6);
+  inverseBox.dataset.copy =
+    `t_left = ${trimNumber(getT0Left(), 4)} + (t_right - ${trimNumber(getT0Right(), 4)}) * ${invScaleText}`;
+  inverseBox.innerHTML =
+    `t_left = ${trimNumber(getT0Left(), 4)} + (t_right &minus; ${trimNumber(getT0Right(), 4)}) &middot; ${invScaleText}` +
+    `<small>inverse mapping (right &rarr; left)</small>`;
+}
+
+for (const box of [formulaBox, inverseBox]) {
+  box.addEventListener("click", () => {
+    const text = box.dataset.copy || box.textContent.trim();
+    navigator.clipboard.writeText(text).then(() => {
+      const original = box.style.background;
+      box.style.background = "#1f5132";
+      setTimeout(() => { box.style.background = original; }, 350);
+    }).catch(() => {});
+  });
+}
+
+// --- Initial state ----------------------------------------------------------
+
+applyDrivenState();
+renderPoints();
+updateFormula();
+</script>
+</body>
+</html>
