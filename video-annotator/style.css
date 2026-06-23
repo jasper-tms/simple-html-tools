@@ -125,6 +125,20 @@ header {
     font-size: 0.875rem;
 }
 
+#video-filename {
+    width: 100%;
+    text-align: left;
+    margin-bottom: 0.75rem;
+    font-family: monospace;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    word-break: break-all;
+}
+
+#video-filename:empty {
+    display: none;
+}
+
 #video-container {
     width: 100%;
     display: flex;
@@ -139,20 +153,20 @@ header {
 
 #drop-overlay {
     display: none;
-    position: absolute;
+    position: fixed;
     inset: 0;
+    z-index: 1000;
     background: rgba(56, 189, 248, 0.15);
-    border: 2px dashed var(--accent);
-    border-radius: var(--radius);
+    border: 3px dashed var(--accent);
     color: var(--accent);
-    font-size: 1.25rem;
+    font-size: 1.5rem;
     font-weight: 600;
     align-items: center;
     justify-content: center;
     pointer-events: none;
 }
 
-#video-container.drag-over #drop-overlay {
+body.drag-over #drop-overlay {
     display: flex;
 }
 

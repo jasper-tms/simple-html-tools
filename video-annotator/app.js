@@ -31,7 +31,28 @@ let state = {
     activeRanges: {} // typeName -> startFrame
 };
 
+// True once a video has successfully loaded. Drag-and-drop video loading is
+// disabled from then on so in-progress annotation work cannot be clobbered by
+// an accidental drop; swap videos intentionally via the Upload Video button or
+// the Load URL bar instead.
+let videoLoaded = false;
+
+// The loaded video's filename (with extension). It is recorded verbatim in the
+// export as the "video" field (provenance) and shown above the player; with the
+// extension stripped it also names the exported JSON (annotations_<name>.json).
+let videoFileName = '';
+
 // --- Video Loading ---
+
+function baseNameWithoutExtension(nameOrPath) {
+    const base = nameOrPath.split('/').pop().split('\\').pop();
+    const dotIndex = base.lastIndexOf('.');
+    return dotIndex > 0 ? base.slice(0, dotIndex) : base;
+}
+
+function setVideoFilename(displayName) {
+    document.getElementById('video-filename').textContent = displayName;
+}
 
 videoUpload.addEventListener('change', (e) => {
     const file = e.target.files[0];
@@ -41,34 +62,73 @@ videoUpload.addEventListener('change', (e) => {
 loadUrlBtn.addEventListener('click', () => {
     if (videoUrl.value) {
         video.src = videoUrl.value;
+        let path = videoUrl.value.split('?')[0].split('#')[0];
+        try { path = decodeURIComponent(path); } catch (err) { /* keep raw */ }
+        const segment = path.split('/').pop().split('\\').pop() || videoUrl.value;
+        videoFileName = segment;
+        setVideoFilename(segment);
     }
 });
 
 // --- Drag and Drop ---
 
 function loadVideoFile(file) {
+    videoFileName = file.name;
+    setVideoFilename(file.name);
     video.src = URL.createObjectURL(file);
 }
 
-videoContainer.addEventListener('dragover', (e) => {
+// Whole-page drag-and-drop. A dropped file is routed by type: a video loads
+// into the player, a .json file imports as annotations. We always preventDefault
+// so a stray drop can never make the browser navigate away and discard the
+// session. Video loading is gated on videoLoaded -- once a video is in place it
+// can only be swapped via the Upload Video button or the Load URL bar, so
+// in-progress work is never clobbered by an accidental drop. (Annotation JSON
+// can still be imported at any time, which is how you resume saved work.)
+function isJsonFile(file) {
+    return file.type === 'application/json'
+        || file.name.toLowerCase().endsWith('.json');
+}
+
+function draggingFiles(event) {
+    return event.dataTransfer
+        && Array.from(event.dataTransfer.types).includes('Files');
+}
+
+document.addEventListener('dragover', (e) => {
+    if (!draggingFiles(e)) return;
     e.preventDefault();
-    videoContainer.classList.add('drag-over');
+    document.body.classList.add('drag-over');
 });
 
-videoContainer.addEventListener('dragleave', () => {
-    videoContainer.classList.remove('drag-over');
+document.addEventListener('dragleave', (e) => {
+    // Only clear when the cursor leaves the window, not when it crosses between
+    // child elements (those bubble a dragleave up to document as well).
+    if (e.relatedTarget === null) document.body.classList.remove('drag-over');
 });
 
-videoContainer.addEventListener('drop', (e) => {
+document.addEventListener('drop', (e) => {
+    if (!draggingFiles(e)) return;
     e.preventDefault();
-    videoContainer.classList.remove('drag-over');
+    document.body.classList.remove('drag-over');
     const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('video/')) {
-        loadVideoFile(file);
+    if (!file) return;
+    if (file.type.startsWith('video/')) {
+        if (!videoLoaded) loadVideoFile(file);   // disabled once a video is loaded
+    } else if (isJsonFile(file)) {
+        // Importing replaces everything in memory, so confirm first if there is
+        // unsaved annotation work that would be overwritten.
+        if (state.annotations.length > 0 && !window.confirm(
+                `Replace the ${state.annotations.length} annotation(s) currently `
+                + `in memory with the contents of ${file.name}?`)) {
+            return;
+        }
+        importJsonFile(file);
     }
 });
 
 video.addEventListener('loadedmetadata', () => {
+    videoLoaded = true;
     seekSlider.max = video.duration;
     updateTimeDisplay();
 });
@@ -168,8 +228,12 @@ function renderEventTypes() {
 }
 
 window.addEventListener('keydown', (e) => {
-    // Ignore if typing in an input
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    // Ignore typing in text/number inputs and selects, but NOT the seek slider:
+    // we still want the frame-stepping and shortcut hotkeys to work when the
+    // scrubber has focus, and our handlers' preventDefault() then suppresses the
+    // range input's native (framerate-ignorant) arrow-key step.
+    if (e.target !== seekSlider
+        && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
 
     const key = e.key.toLowerCase();
     const type = state.eventTypes.find(t => t.shortcut.toLowerCase() === key);
@@ -290,12 +354,15 @@ exportBtn.addEventListener('click', () => {
     }
     const exportData = { ...state, fps: getFPS() };
     delete exportData.activeRanges;
+    if (videoFileName) exportData.video = videoFileName;
     const data = JSON.stringify(exportData, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'annotations.json';
+    a.download = videoFileName
+        ? `annotations_${baseNameWithoutExtension(videoFileName)}.json`
+        : 'annotations.json';
     a.click();
 });
 
@@ -323,22 +390,5 @@ importUpload.addEventListener('change', (e) => {
     if (file) importJsonFile(file);
 });
 
-const annotationsSection = document.querySelector('.annotations-log');
-
-annotationsSection.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    annotationsSection.style.outline = '2px dashed var(--accent)';
-});
-
-annotationsSection.addEventListener('dragleave', () => {
-    annotationsSection.style.outline = '';
-});
-
-annotationsSection.addEventListener('drop', (e) => {
-    e.preventDefault();
-    annotationsSection.style.outline = '';
-    const file = e.dataTransfer.files[0];
-    if (file && file.name.endsWith('.json')) {
-        importJsonFile(file);
-    }
-});
+// Drag-and-drop annotation import is handled by the unified whole-page drop
+// handler near the top of this file (routes .json files to importJsonFile).
