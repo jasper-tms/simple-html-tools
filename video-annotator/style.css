@@ -385,13 +385,24 @@ td {
     to { transform: translateY(-150%); opacity: 0; }
 }
 
-/* Custom range styles for better aesthetics */
+/* Custom range styles for better aesthetics. The track and thumb pseudo-elements
+   are vendor-specific and cannot be combined into one selector list: a browser
+   that does not recognize one selector drops the whole rule, so Chrome
+   (-webkit-) and Firefox (-moz-) each need their own copy. */
 input[type=range] {
     -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
     background: transparent;
 }
 
 input[type=range]::-webkit-slider-runnable-track {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+}
+
+input[type=range]::-moz-range-track {
     height: 4px;
     background: var(--border);
     border-radius: 2px;
@@ -404,5 +415,14 @@ input[type=range]::-webkit-slider-thumb {
     background: var(--accent);
     border-radius: 50%;
     margin-top: -5px;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+}
+
+input[type=range]::-moz-range-thumb {
+    height: 14px;
+    width: 14px;
+    background: var(--accent);
+    border: none;
+    border-radius: 50%;
     box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
 }
