@@ -125,17 +125,46 @@ header {
     font-size: 0.875rem;
 }
 
-#video-filename {
+/* The filename (base layer, left-aligned) and the per-frame annotation list
+   (overlay, top-right) share one row. The list is absolutely positioned and
+   carries its own opaque background, so when it grows wide it sits on top of the
+   title and occludes it from the right; a short list leaves the title visible. */
+#video-title-row {
+    position: relative;
     width: 100%;
-    text-align: left;
     margin-bottom: 0.75rem;
+    min-height: 1.35rem;
+}
+
+/* Collapse the row (and its margin) entirely until there is something to show. */
+#video-title-row:not(:has(:not(:empty))) {
+    display: none;
+}
+
+#video-filename {
+    text-align: left;
     font-family: monospace;
     font-size: 0.9rem;
     color: var(--text-primary);
     word-break: break-all;
 }
 
-#video-filename:empty {
+#frame-annotations {
+    position: absolute;
+    top: 0;
+    right: 0;
+    max-width: 100%;
+    padding-left: 0.75rem;
+    background: #1e293b;
+    font-family: monospace;
+    font-size: 0.9rem;
+    color: var(--accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#frame-annotations:empty {
     display: none;
 }
 

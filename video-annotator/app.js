@@ -17,6 +17,7 @@ const newEventType = document.getElementById('new-event-type');
 const newEventShortcut = document.getElementById('new-event-shortcut');
 const newEventRemoveShortcut = document.getElementById('new-event-remove-shortcut');
 
+const frameAnnotations = document.getElementById('frame-annotations');
 const annotationsBody = document.getElementById('annotations-body');
 const exportBtn = document.getElementById('export-btn');
 const importUpload = document.getElementById('import-upload');
@@ -187,6 +188,24 @@ function updateTimeDisplay() {
     if (document.activeElement !== frameInput) {
         frameInput.value = frame;
     }
+    updateFrameAnnotations();
+}
+
+// Overlay above the top-right of the video listing, as a " | "-separated list,
+// the distinct event types whose committed annotations span the current frame
+// (point annotations on exactly this frame, range annotations enclosing it).
+// In-progress ranges are excluded since they are not committed yet. Driven by
+// both frame changes (updateTimeDisplay) and annotation edits (renderAnnotations).
+function updateFrameAnnotations() {
+    const frame = Math.floor(video.currentTime * getFPS());
+    const names = [];
+    state.annotations.forEach(a => {
+        if (a.startFrame <= frame && a.endFrame >= frame
+            && !names.includes(a.typeName)) {
+            names.push(a.typeName);
+        }
+    });
+    frameAnnotations.textContent = names.join(' | ');
 }
 
 function formatTime(seconds) {
@@ -402,6 +421,8 @@ function renderAnnotations() {
         `;
         annotationsBody.prepend(tr);
     });
+
+    updateFrameAnnotations();
 }
 
 window.jumpToFrame = (frame) => {
