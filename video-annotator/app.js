@@ -123,10 +123,10 @@ let state = {
     activeRanges: {} // typeName -> startFrame
 };
 
-// True once a video has successfully loaded. Drag-and-drop video loading is
-// disabled from then on so in-progress annotation work cannot be clobbered by
-// an accidental drop; swap videos intentionally via the Upload Video button or
-// the Load URL bar instead.
+// True once a video has successfully loaded. From then on, replacing the video
+// via drag-and-drop asks for confirmation first so in-progress annotation work
+// cannot be clobbered by an accidental drop; the Upload Video button and the
+// Load URL bar swap videos without prompting.
 let videoLoaded = false;
 
 // The loaded video's filename (with extension). It is recorded verbatim in the
@@ -173,10 +173,10 @@ function loadVideoFile(file) {
 // Whole-page drag-and-drop. A dropped file is routed by type: a video loads
 // into the player, a .json file imports as annotations. We always preventDefault
 // so a stray drop can never make the browser navigate away and discard the
-// session. Video loading is gated on videoLoaded -- once a video is in place it
-// can only be swapped via the Upload Video button or the Load URL bar, so
-// in-progress work is never clobbered by an accidental drop. (Annotation JSON
-// can still be imported at any time, which is how you resume saved work.)
+// session. Once a video is in place, dropping a new one prompts for
+// confirmation before swapping so in-progress work is never clobbered by an
+// accidental drop. (Annotation JSON can still be imported at any time, which is
+// how you resume saved work.)
 function isJsonFile(file) {
     return file.type === 'application/json'
         || file.name.toLowerCase().endsWith('.json');
@@ -206,7 +206,14 @@ document.addEventListener('drop', (e) => {
     const file = e.dataTransfer.files[0];
     if (!file) return;
     if (file.type.startsWith('video/')) {
-        if (!videoLoaded) loadVideoFile(file);   // disabled once a video is loaded
+        // Once a video is loaded, replacing it via an accidental drop would
+        // discard the session, so confirm before swapping.
+        if (videoLoaded && !window.confirm(
+                `Replace the current video (${videoFileName}) with ${file.name}? `
+                + `Your existing annotations will be kept.`)) {
+            return;
+        }
+        loadVideoFile(file);
     } else if (isJsonFile(file)) {
         // Importing replaces everything in memory, so confirm first if there is
         // unsaved annotation work that would be overwritten.
