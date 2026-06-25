@@ -344,6 +344,47 @@ td {
     color: white;
 }
 
+/* Toast notifications, dropping down from the top of the screen */
+#toast-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding-top: 1rem;
+    pointer-events: none;
+}
+
+.toast {
+    background: var(--card-bg);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--accent);
+    color: var(--text-primary);
+    padding: 0.6rem 1.2rem;
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    animation: toast-drop 0.25s ease-out;
+}
+
+.toast.toast-hiding {
+    animation: toast-lift 0.25s ease-in forwards;
+}
+
+@keyframes toast-drop {
+    from { transform: translateY(-150%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes toast-lift {
+    from { transform: translateY(0); opacity: 1; }
+    to { transform: translateY(-150%); opacity: 0; }
+}
+
 /* Custom range styles for better aesthetics */
 input[type=range] {
     -webkit-appearance: none;

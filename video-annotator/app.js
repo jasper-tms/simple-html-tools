@@ -194,6 +194,24 @@ function formatTime(seconds) {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
+// --- Toast Notifications ---
+
+const toastContainer = document.getElementById('toast-container');
+
+// Briefly show a small message dropping down from the top of the screen, then
+// slide it back up and remove it. Used to flag attempts to double-annotate a
+// frame, where no annotation is added.
+function showToast(message, durationMs = 1000) {
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    toastContainer.appendChild(toast);
+    setTimeout(() => {
+        toast.classList.add('toast-hiding');
+        toast.addEventListener('animationend', () => toast.remove());
+    }, durationMs);
+}
+
 // --- Annotation Logic ---
 
 addEventBtn.addEventListener('click', () => {
@@ -242,11 +260,21 @@ window.addEventListener('keydown', (e) => {
         const currentFrame = Math.floor(video.currentTime * getFPS());
 
         if (type.type === 'point') {
-            state.annotations.push({
-                typeName: type.name,
-                startFrame: currentFrame,
-                endFrame: currentFrame
-            });
+            // Guard against double-annotating: pressing the same hotkey twice on
+            // the same frame would otherwise create an identical duplicate point.
+            const alreadyAnnotated = state.annotations.some(a =>
+                a.typeName === type.name
+                && a.startFrame === currentFrame
+                && a.endFrame === currentFrame);
+            if (alreadyAnnotated) {
+                showToast(`Frame ${currentFrame} already annotated with "${type.name}"`);
+            } else {
+                state.annotations.push({
+                    typeName: type.name,
+                    startFrame: currentFrame,
+                    endFrame: currentFrame
+                });
+            }
         } else {
             // Range logic
             if (state.activeRanges[type.name] !== undefined) {
