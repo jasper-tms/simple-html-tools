@@ -338,6 +338,69 @@ h2 {
     margin-bottom: 1rem;
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.sort-control {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+/* Custom dropdown (button + list) rather than a native <select>, so that arrow
+   keys never silently cycle the value. Selection commits only on click, which
+   keeps the recency-based tiebreak ordering honest. */
+.dropdown {
+    position: relative;
+}
+
+.dropdown-toggle {
+    background: var(--border);
+    color: white;
+    border: 1px solid var(--border);
+    padding: 0.4rem 0.8rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.875rem;
+    text-align: right;
+}
+
+.dropdown-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 50;
+    list-style: none;
+    background: #1e293b;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    min-width: 100%;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.dropdown-menu li {
+    padding: 0.4rem 0.8rem;
+    cursor: pointer;
+    white-space: nowrap;
+    text-align: right;
+    color: var(--text-primary);
+}
+
+.dropdown-menu li:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.dropdown-menu li.selected {
+    color: var(--accent);
+}
+
 .io-controls {
     display: flex;
     gap: 0.5rem;

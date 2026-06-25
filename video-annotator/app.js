@@ -23,8 +23,98 @@ const exportBtn = document.getElementById('export-btn');
 const importUpload = document.getElementById('import-upload');
 const fpsInput = document.getElementById('fps-input');
 
+const sortToggle = document.getElementById('sort-toggle');
+const sortMenu = document.getElementById('sort-menu');
+
 function getFPS() {
     return parseFloat(fpsInput.value) || 30;
+}
+
+// --- Annotation sorting ---
+
+// Each sort option is a comparator over two annotations. The arrow follows the
+// GNOME/file-manager convention where up means the largest value sits at the
+// top: "up" puts the highest start frame (or alphabetically last type name)
+// first, "down" puts the lowest start frame (or A-first type name) first.
+const sortComparators = {
+    event_up: (a, b) => b.typeName.localeCompare(a.typeName),
+    event_down: (a, b) => a.typeName.localeCompare(b.typeName),
+    start_up: (a, b) => b.startFrame - a.startFrame,
+    start_down: (a, b) => a.startFrame - b.startFrame,
+};
+
+const sortLabels = {
+    event_up: 'Event ↑',
+    event_down: 'Event ↓',
+    start_up: 'Start ↑',
+    start_down: 'Start ↓',
+};
+
+// The options ordered most-recently-selected first. The front element is the
+// current primary sort; the rest act as successive tiebreakers, so selecting a
+// new option both makes it primary and demotes the previous primary to the top
+// tiebreaker. Defaults to "Start up" primary, matching the dropdown's initial label.
+let sortRecency = ['start_up', 'event_down', 'start_down', 'event_up'];
+
+function compareAnnotations(a, b) {
+    for (const key of sortRecency) {
+        const result = sortComparators[key](a, b);
+        if (result !== 0) return result;
+    }
+    return 0;
+}
+
+function selectSort(key) {
+    sortRecency = [key, ...sortRecency.filter(k => k !== key)];
+    sortToggle.textContent = sortLabels[key];
+    Array.from(sortMenu.children).forEach(li =>
+        li.classList.toggle('selected', li.dataset.key === key));
+    renderAnnotations();
+}
+
+// Toggle the menu open/closed. stopPropagation keeps the document-level
+// click-to-close handler below from immediately closing what we just opened.
+sortToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    sortMenu.hidden = !sortMenu.hidden;
+});
+
+sortMenu.addEventListener('click', (e) => {
+    const li = e.target.closest('li[data-key]');
+    if (!li) return;
+    selectSort(li.dataset.key);
+    sortMenu.hidden = true;
+});
+
+// Any click elsewhere, or Escape, closes the menu.
+document.addEventListener('click', () => { sortMenu.hidden = true; });
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') sortMenu.hidden = true;
+});
+
+// Reflect the default selection in the menu highlight on load.
+Array.from(sortMenu.children).forEach(li =>
+    li.classList.toggle('selected', li.dataset.key === sortRecency[0]));
+
+// Pin the toggle's width to its widest possible label so it does not resize as
+// the selection changes. We measure each label in the toggle element itself
+// (synchronously, before paint, so there is no flicker) to capture its exact
+// font, padding, and border, then lock that as the min-width. Re-run once the
+// web font has loaded since fallback-font metrics differ.
+function fitSortToggleWidth() {
+    const current = sortToggle.textContent;
+    let widest = 0;
+    Object.values(sortLabels).forEach(label => {
+        sortToggle.textContent = label;
+        widest = Math.max(widest, sortToggle.offsetWidth);
+    });
+    sortToggle.textContent = current;
+    sortToggle.style.minWidth = widest + 'px';
+}
+
+fitSortToggleWidth();
+if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(fitSortToggleWidth);
 }
 
 let state = {
@@ -387,8 +477,9 @@ window.addEventListener('keydown', (e) => {
 
 function renderAnnotations() {
     annotationsBody.innerHTML = '';
-    // Sort by frame
-    const sorted = [...state.annotations].sort((a, b) => b.startFrame - a.startFrame);
+    // Sort by the user's chosen "Sort by" option, with previously-selected
+    // options applied as successive tiebreakers (see compareAnnotations).
+    const sorted = [...state.annotations].sort(compareAnnotations);
 
     sorted.forEach((ann, idx) => {
         const tr = document.createElement('tr');

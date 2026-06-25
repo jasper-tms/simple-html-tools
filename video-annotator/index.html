@@ -73,10 +73,24 @@
                 <section class="annotations-log">
                     <div class="section-header">
                         <h2>Annotations</h2>
-                        <div class="io-controls">
-                            <button id="export-btn" class="btn-secondary">Export JSON</button>
-                            <input type="file" id="import-upload" accept=".json" hidden>
-                            <button onclick="document.getElementById('import-upload').click()" class="btn-secondary">Import JSON</button>
+                        <div class="header-actions">
+                            <div class="sort-control">
+                                <label>Sort by</label>
+                                <div class="dropdown">
+                                    <button id="sort-toggle" class="dropdown-toggle" type="button">Start &#8593;</button>
+                                    <ul id="sort-menu" class="dropdown-menu" hidden>
+                                        <li data-key="start_up">Start &#8593;</li>
+                                        <li data-key="start_down">Start &#8595;</li>
+                                        <li data-key="event_up">Event &#8593;</li>
+                                        <li data-key="event_down">Event &#8595;</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <div class="io-controls">
+                                <button id="export-btn" class="btn-secondary">Export JSON</button>
+                                <input type="file" id="import-upload" accept=".json" hidden>
+                                <button onclick="document.getElementById('import-upload').click()" class="btn-secondary">Import JSON</button>
+                            </div>
                         </div>
                     </div>
                     <div class="table-container">
