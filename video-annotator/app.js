@@ -15,6 +15,7 @@ const addEventBtn = document.getElementById('add-event-btn');
 const newEventName = document.getElementById('new-event-name');
 const newEventType = document.getElementById('new-event-type');
 const newEventShortcut = document.getElementById('new-event-shortcut');
+const newEventRemoveShortcut = document.getElementById('new-event-remove-shortcut');
 
 const annotationsBody = document.getElementById('annotations-body');
 const exportBtn = document.getElementById('export-btn');
@@ -214,21 +215,30 @@ function showToast(message, durationMs = 1000) {
 
 // --- Annotation Logic ---
 
+// Typing in the "add" key box mirrors the capitalized key into the "remove" key
+// box, clobbering whatever is there. Typing directly in the "remove" box is left
+// untouched, so it can be overridden with any key the user prefers.
+newEventShortcut.addEventListener('input', () => {
+    newEventRemoveShortcut.value = newEventShortcut.value.toUpperCase();
+});
+
 addEventBtn.addEventListener('click', () => {
     const name = newEventName.value.trim();
     if (!name) return;
 
     const type = newEventType.value;
     const shortcut = newEventShortcut.value.trim() || name[0].toLowerCase();
+    const removeShortcut = newEventRemoveShortcut.value.trim() || shortcut.toUpperCase();
 
     if (state.eventTypes.find(t => t.name === name)) {
         alert('Event type already exists');
         return;
     }
 
-    state.eventTypes.push({ name, type, shortcut });
+    state.eventTypes.push({ name, type, shortcut, removeShortcut });
     newEventName.value = '';
     newEventShortcut.value = '';
+    newEventRemoveShortcut.value = '';
     renderEventTypes();
 });
 
@@ -237,9 +247,11 @@ function renderEventTypes() {
     state.eventTypes.forEach(t => {
         const div = document.createElement('div');
         div.className = 'event-type-item';
+        const removeShortcut = t.removeShortcut || t.shortcut.toUpperCase();
+        const typeSuffix = t.type === 'range' ? ' (range)' : '';
         div.innerHTML = `
-            <span><strong>${t.name}</strong> (${t.type})</span>
-            <span class="shortcut-tag">Key: ${t.shortcut}</span>
+            <span><strong>${t.name}</strong>${typeSuffix} (${t.shortcut}/${removeShortcut})</span>
+            <button class="btn-delete" onclick="removeEventType('${t.name}')">del</button>
         `;
         eventTypesList.appendChild(div);
     });
@@ -253,43 +265,83 @@ window.addEventListener('keydown', (e) => {
     if (e.target !== seekSlider
         && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
 
-    const key = e.key.toLowerCase();
-    const type = state.eventTypes.find(t => t.shortcut.toLowerCase() === key);
+    // Matching is case-sensitive so the add key (e.g. "f") and the remove key
+    // (e.g. "F", i.e. Shift+f) can be told apart. We check add first, then remove.
+    const addType = state.eventTypes.find(t => t.shortcut === e.key);
+    const removeType = state.eventTypes.find(t =>
+        (t.removeShortcut || t.shortcut.toUpperCase()) === e.key);
 
-    if (type) {
+    if (addType) {
         const currentFrame = Math.floor(video.currentTime * getFPS());
 
-        if (type.type === 'point') {
+        if (addType.type === 'point') {
             // Guard against double-annotating: pressing the same hotkey twice on
             // the same frame would otherwise create an identical duplicate point.
             const alreadyAnnotated = state.annotations.some(a =>
-                a.typeName === type.name
+                a.typeName === addType.name
                 && a.startFrame === currentFrame
                 && a.endFrame === currentFrame);
             if (alreadyAnnotated) {
-                showToast(`Frame ${currentFrame} already annotated with "${type.name}"`);
+                showToast(`Frame ${currentFrame} already annotated with "${addType.name}"`);
             } else {
                 state.annotations.push({
-                    typeName: type.name,
+                    typeName: addType.name,
                     startFrame: currentFrame,
                     endFrame: currentFrame
                 });
             }
         } else {
             // Range logic
-            if (state.activeRanges[type.name] !== undefined) {
-                // End the range
-                const start = state.activeRanges[type.name];
+            if (state.activeRanges[addType.name] !== undefined) {
+                // End the range. Store the smaller frame as the start and the
+                // larger as the end, regardless of which the user marked first.
+                const marked = state.activeRanges[addType.name];
                 state.annotations.push({
-                    typeName: type.name,
-                    startFrame: start,
-                    endFrame: currentFrame
+                    typeName: addType.name,
+                    startFrame: Math.min(marked, currentFrame),
+                    endFrame: Math.max(marked, currentFrame)
                 });
-                delete state.activeRanges[type.name];
+                delete state.activeRanges[addType.name];
             } else {
                 // Start the range
-                state.activeRanges[type.name] = currentFrame;
-                console.log(`Started range for ${type.name} at ${currentFrame}`);
+                state.activeRanges[addType.name] = currentFrame;
+                console.log(`Started range for ${addType.name} at ${currentFrame}`);
+            }
+        }
+        renderAnnotations();
+    } else if (removeType) {
+        const currentFrame = Math.floor(video.currentTime * getFPS());
+
+        if (removeType.type === 'range') {
+            if (state.activeRanges[removeType.name] !== undefined) {
+                // A range is mid-recording: the remove key cancels it.
+                delete state.activeRanges[removeType.name];
+            } else {
+                // Find completed ranges of this type that span the current frame.
+                const matches = state.annotations.filter(a =>
+                    a.typeName === removeType.name
+                    && a.startFrame <= currentFrame
+                    && a.endFrame >= currentFrame);
+                if (matches.length === 0) {
+                    showToast(`No "${removeType.name}" annotation at frame ${currentFrame} to remove`);
+                } else if (matches.length === 1) {
+                    state.annotations.splice(state.annotations.indexOf(matches[0]), 1);
+                } else {
+                    showToast(`${matches.length} different "${removeType.name}" ranges span `
+                        + `frame ${currentFrame}, so nothing was deleted -- use the del `
+                        + `button to remove a specific one`, 3000);
+                }
+            }
+        } else {
+            // Point: an exact frame match (at most one per type per frame).
+            const index = state.annotations.findIndex(a =>
+                a.typeName === removeType.name
+                && a.startFrame === currentFrame
+                && a.endFrame === currentFrame);
+            if (index === -1) {
+                showToast(`No "${removeType.name}" annotation at frame ${currentFrame} to remove`);
+            } else {
+                state.annotations.splice(index, 1);
             }
         }
         renderAnnotations();
@@ -317,7 +369,7 @@ window.addEventListener('keydown', (e) => {
 function renderAnnotations() {
     annotationsBody.innerHTML = '';
     // Sort by frame
-    const sorted = [...state.annotations].sort((a, b) => a.startFrame - b.startFrame);
+    const sorted = [...state.annotations].sort((a, b) => b.startFrame - a.startFrame);
 
     sorted.forEach((ann, idx) => {
         const tr = document.createElement('tr');
@@ -360,6 +412,16 @@ window.cancelRange = (name) => {
     delete state.activeRanges[name];
     renderAnnotations();
 }
+
+// Remove an event type from the menu. Existing annotations of this type are
+// intentionally left in place; only an in-progress range recording (which could
+// no longer be ended once its hotkey is gone) is cancelled.
+window.removeEventType = (name) => {
+    state.eventTypes = state.eventTypes.filter(t => t.name !== name);
+    delete state.activeRanges[name];
+    renderEventTypes();
+    renderAnnotations();
+};
 
 window.deleteAnnotation = (index) => {
     state.annotations.splice(index, 1);

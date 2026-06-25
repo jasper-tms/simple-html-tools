@@ -269,12 +269,21 @@ h2 {
 }
 
 .add-event-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* Event type, add key, and remove key share one row below the name. min-width:0
+   lets the boxes shrink to fit the column instead of overflowing the card. */
+.event-attrs {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1.4fr 1fr 1fr;
     gap: 0.5rem;
 }
 
 .add-event-form input, .add-event-form select {
+    min-width: 0;
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid var(--border);
     color: white;
@@ -283,7 +292,6 @@ h2 {
 }
 
 #add-event-btn {
-    grid-column: span 2;
     background: var(--accent);
     color: var(--bg-dark);
     border: none;

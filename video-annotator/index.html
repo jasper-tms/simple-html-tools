@@ -55,11 +55,14 @@
                     <div id="event-types-list"></div>
                     <div class="add-event-form">
                         <input type="text" id="new-event-name" placeholder="Event Name">
-                        <select id="new-event-type">
-                            <option value="point">Single Frame</option>
-                            <option value="range">Frame Range</option>
-                        </select>
-                        <input type="text" id="new-event-shortcut" maxlength="1" placeholder="Key">
+                        <div class="event-attrs">
+                            <select id="new-event-type">
+                                <option value="point">Single Frame</option>
+                                <option value="range">Frame Range</option>
+                            </select>
+                            <input type="text" id="new-event-shortcut" maxlength="1" placeholder="Add key">
+                            <input type="text" id="new-event-remove-shortcut" maxlength="1" placeholder="Remove key">
+                        </div>
                         <button id="add-event-btn">+</button>
                     </div>
                 </section>
