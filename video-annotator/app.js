@@ -9,6 +9,9 @@ const playPauseBtn = document.getElementById('play-pause-btn');
 const seekSlider = document.getElementById('seek-slider');
 const timeDisplay = document.getElementById('time-display');
 const frameInput = document.getElementById('frame-input');
+const frameTotal = document.getElementById('frame-total');
+const rateInfo = document.getElementById('rate-info');
+const indexStatus = document.getElementById('index-status');
 
 const eventTypesList = document.getElementById('event-types-list');
 const addEventBtn = document.getElementById('add-event-btn');
@@ -21,13 +24,78 @@ const frameAnnotations = document.getElementById('frame-annotations');
 const annotationsBody = document.getElementById('annotations-body');
 const exportBtn = document.getElementById('export-btn');
 const importUpload = document.getElementById('import-upload');
-const fpsInput = document.getElementById('fps-input');
 
 const sortToggle = document.getElementById('sort-toggle');
 const sortMenu = document.getElementById('sort-menu');
 
-function getFPS() {
-    return parseFloat(fpsInput.value) || 30;
+// --- Frame index: the heart of frame-accurate annotation ---
+//
+// HTML <video> has no concept of a frame; it only exposes currentTime (float
+// seconds), and converting that to a frame number with an assumed fps is not
+// reliable (floating-point boundaries, NTSC rates, variable frame rate). So we
+// never trust currentTime->frame arithmetic. Instead, on load we demux the
+// container with mp4box to read every frame's exact presentation timestamp,
+// giving an authoritative table. The CANONICAL state is then the integer
+// `currentFrame`; we navigate by COMMANDING the video to a frame and never by
+// reading back which frame it landed on (Firefox in particular reports a bogus
+// post-seek mediaTime). See videoIndex / seekToFrame / frameAtTime below.
+//
+// videoIndex: { pts:[seconds], dur:[seconds], nFrames, isVFR, fps, avgFps }
+//   pts/dur are in the <video>.currentTime (movie) timeline.
+let videoIndex = null;
+let currentFrame = 0;
+let playbackTrackingStarted = false;
+let alignmentChecked = false;
+
+function median(values) {
+    if (!values.length) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = sorted.length >> 1;
+    return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function clampFrame(frame) {
+    if (!videoIndex) return 0;
+    return Math.max(0, Math.min(frame, videoIndex.nFrames - 1));
+}
+
+// The seek target for a frame: the MIDPOINT of its display interval. Seeking to
+// a frame boundary (pts[N]) lands on the previous frame in every browser tested;
+// the midpoint has half an interval of margin in both directions and lands on
+// frame N reliably. This is the variable-frame-rate generalization of the
+// constant-rate (N + 0.5) / fps.
+function midpointTime(frame) {
+    const pts = videoIndex.pts;
+    const start = pts[frame];
+    const end = (frame + 1 < pts.length)
+        ? pts[frame + 1]
+        : start + (videoIndex.dur[frame] || (start - (pts[frame - 1] ?? start)) || 0.04);
+    return (start + end) / 2;
+}
+
+// Frame displayed at movie-timeline time t: the last frame whose pts <= t.
+function frameAtTime(t) {
+    const pts = videoIndex.pts;
+    let low = 0, high = pts.length - 1, answer = 0;
+    while (low <= high) {
+        const mid = (low + high) >> 1;
+        if (pts[mid] <= t) { answer = mid; low = mid + 1; } else { high = mid - 1; }
+    }
+    return answer;
+}
+
+function seekToFrame(frame) {
+    if (!videoIndex) return;
+    currentFrame = clampFrame(frame);
+    let target = midpointTime(currentFrame);
+    const duration = video.duration || target;
+    target = Math.min(Math.max(target, 0), Math.max(0, duration - 1e-6));
+    video.currentTime = target;
+    updateFrameUI();
+}
+
+function stepFrame(delta) {
+    seekToFrame(currentFrame + delta);
 }
 
 // --- Annotation sorting ---
@@ -152,14 +220,15 @@ videoUpload.addEventListener('change', (e) => {
 });
 
 loadUrlBtn.addEventListener('click', () => {
-    if (videoUrl.value) {
-        video.src = videoUrl.value;
-        let path = videoUrl.value.split('?')[0].split('#')[0];
-        try { path = decodeURIComponent(path); } catch (err) { /* keep raw */ }
-        const segment = path.split('/').pop().split('\\').pop() || videoUrl.value;
-        videoFileName = segment;
-        setVideoFilename(segment);
-    }
+    if (!videoUrl.value) return;
+    video.src = videoUrl.value;
+    let path = videoUrl.value.split('?')[0].split('#')[0];
+    try { path = decodeURIComponent(path); } catch (err) { /* keep raw */ }
+    const segment = path.split('/').pop().split('\\').pop() || videoUrl.value;
+    videoFileName = segment;
+    setVideoFilename(segment);
+    // Frame indexing needs the raw bytes; fetch them (subject to CORS).
+    indexVideoFromUrl(videoUrl.value);
 });
 
 // --- Drag and Drop ---
@@ -168,6 +237,7 @@ function loadVideoFile(file) {
     videoFileName = file.name;
     setVideoFilename(file.name);
     video.src = URL.createObjectURL(file);
+    indexVideoFromFile(file);
 }
 
 // Whole-page drag-and-drop. A dropped file is routed by type: a video loads
@@ -226,11 +296,206 @@ document.addEventListener('drop', (e) => {
     }
 });
 
+// --- Frame index construction (mp4box demux) ---
+
+// A byte-source reader: { size, read(start, end) -> Promise<ArrayBuffer> }.
+// Lets the demuxer pull only the ranges it needs instead of the whole file.
+function fileReader(file) {
+    return { size: file.size, read: (start, end) => file.slice(start, end).arrayBuffer() };
+}
+
+async function urlReader(url) {
+    const head = await fetch(url, { method: 'HEAD' });
+    const size = Number(head.headers.get('Content-Length'));
+    if (!size || head.headers.get('Accept-Ranges') !== 'bytes') {
+        throw new Error('range requests unsupported');
+    }
+    return {
+        size,
+        read: async (start, end) => {
+            const response = await fetch(url, { headers: { Range: `bytes=${start}-${end - 1}` } });
+            return response.arrayBuffer();
+        },
+    };
+}
+
+// Build the per-frame presentation-time table in the <video>.currentTime (movie)
+// timeline. We only ever need the container's moov (the index), never the mdat
+// (the frame bytes), so this NEVER loads the whole file: it feeds mp4box chunks
+// on demand, lets it skip the mdat (appendBuffer returns the next byte offset it
+// wants), and reads per-frame timing from the parsed sample table rather than
+// extracting any sample data. Memory stays ~ the size of the index no matter how
+// large the video is.
+async function demuxFrameIndex(reader) {
+    if (typeof MP4Box === 'undefined') throw new Error('mp4box library not loaded');
+    const mp4 = MP4Box.createFile();
+    let ready = false, track = null, movieTimescale = 1, errorMessage = null;
+    mp4.onError = (err) => { errorMessage = err; };
+    mp4.onReady = (info) => {
+        ready = true;
+        movieTimescale = info.timescale;
+        track = info.videoTracks && info.videoTracks[0];
+    };
+
+    // Feed chunks until the moov is parsed (onReady fires synchronously inside
+    // appendBuffer). The returned offset jumps past the mdat for moov-at-end
+    // files, so we read only ftyp + box headers + moov.
+    const CHUNK = 1 << 20; // 1 MiB
+    let position = 0;
+    while (!ready) {
+        if (errorMessage) throw new Error('mp4box: ' + errorMessage);
+        if (position >= reader.size) break;
+        const end = Math.min(position + CHUNK, reader.size);
+        const buffer = await reader.read(position, end);
+        buffer.fileStart = position;
+        const next = mp4.appendBuffer(buffer);
+        if (ready) break;
+        position = (typeof next === 'number' && next > position) ? next : end;
+    }
+    if (errorMessage) throw new Error('mp4box: ' + errorMessage);
+    if (!ready || !track) {
+        throw new Error('No video track / moov not found (not a supported MP4/MOV?)');
+    }
+
+    // Per-frame timing straight from the parsed sample table (no media data).
+    // mp4box yields samples in DECODE order; with B-frames the composition times
+    // are non-monotonic there, so sort by composition time for presentation order.
+    const samples = mp4.getTrackSamplesInfo(track.id);
+    const mediaTimescale = track.timescale;
+    const ordered = samples.slice().sort((a, b) => a.cts - b.cts);
+
+    // Edit list -> movie timeline. A trim edit (media_time >= 0) shifts the media
+    // start to movie time 0; a leading empty edit (media_time === -1) inserts a
+    // delay. Identity edits leave it alone.
+    let trimOffset = 0, emptyDelay = 0;
+    const edits = track.edits;
+    if (edits && edits.length) {
+        for (const edit of edits) {
+            if (edit.media_time === -1) emptyDelay += edit.segment_duration / movieTimescale;
+            else { trimOffset = edit.media_time / mediaTimescale; break; }
+        }
+    }
+    const pts = ordered.map(s => s.cts / mediaTimescale - trimOffset + emptyDelay);
+    const dur = ordered.map(s => s.duration / mediaTimescale);
+    mp4.flush();
+    return { pts, dur, nFrames: pts.length };
+}
+
+function applyFrameIndex(index) {
+    const deltas = [];
+    for (let i = 1; i < index.pts.length; i++) deltas.push(index.pts[i] - index.pts[i - 1]);
+    const medianDelta = median(deltas);
+    // Constant-rate files can still have a stray off-length frame (encoder
+    // timebase rounding, a different final frame), so flag VFR only when a
+    // meaningful FRACTION of intervals deviate, not just a single outlier.
+    let deviating = 0;
+    if (medianDelta > 0) {
+        for (const d of deltas) if (Math.abs(d - medianDelta) / medianDelta > 0.05) deviating++;
+    }
+    index.isVFR = deltas.length > 0 && (deviating / deltas.length) > 0.01;
+    index.avgFps = index.pts.length > 1
+        ? (index.pts.length - 1) / (index.pts[index.pts.length - 1] - index.pts[0])
+        : 0;
+    index.fps = index.isVFR ? null : (medianDelta > 0 ? 1 / medianDelta : 0);
+
+    videoIndex = index;
+    alignmentChecked = false;
+    seekSlider.max = index.nFrames - 1;
+    frameInput.max = index.nFrames - 1;
+    frameTotal.textContent = `/ ${index.nFrames - 1}`;
+    rateInfo.textContent = index.isVFR
+        ? `VFR (~${index.avgFps.toFixed(2)} fps)`
+        : `${index.fps.toFixed(2)} fps`;
+    indexStatus.textContent = `${index.nFrames} frames`;
+    indexStatus.style.color = '';
+
+    currentFrame = 0;
+    // Show the first frame once the video can seek.
+    if (video.readyState >= 1) seekToFrame(0);
+    else video.addEventListener('loadedmetadata', () => seekToFrame(0), { once: true });
+}
+
+function reportIndexFailure(error) {
+    videoIndex = null;
+    indexStatus.textContent = 'Indexing failed: ' + error.message;
+    indexStatus.style.color = 'var(--danger, #a05252)';
+    console.error('Frame indexing failed:', error);
+    showToast('Could not index this video for frame-accurate annotation: '
+        + error.message, 4000);
+}
+
+async function indexVideoFromFile(file) {
+    videoIndex = null;
+    indexStatus.textContent = 'Indexing…';
+    indexStatus.style.color = '';
+    try {
+        applyFrameIndex(await demuxFrameIndex(fileReader(file)));
+    } catch (error) {
+        reportIndexFailure(error);
+    }
+}
+
+async function indexVideoFromUrl(url) {
+    videoIndex = null;
+    indexStatus.textContent = 'Indexing…';
+    indexStatus.style.color = '';
+    try {
+        let reader;
+        try {
+            // Prefer range requests so a remote video is also streamed, not
+            // pulled in full.
+            reader = await urlReader(url);
+        } catch (rangeError) {
+            // Server lacks range support: fall back to one fetch, wrapped as a
+            // reader over the in-memory bytes.
+            const buffer = await (await fetch(url)).arrayBuffer();
+            reader = { size: buffer.byteLength, read: (s, e) => Promise.resolve(buffer.slice(s, e)) };
+        }
+        applyFrameIndex(await demuxFrameIndex(reader));
+    } catch (error) {
+        reportIndexFailure(new Error(error.message
+            + ' (URL must be CORS-accessible; otherwise load the file directly)'));
+    }
+}
+
 video.addEventListener('loadedmetadata', () => {
     videoLoaded = true;
-    seekSlider.max = video.duration;
-    updateTimeDisplay();
+    startPlaybackTracking();
+    updateFrameUI();
 });
+
+// During playback the displayed frame is read from requestVideoFrameCallback's
+// mediaTime, which is reliable WHILE PLAYING (its post-seek value is not, which
+// is why stepping/seeking rely on the commanded integer instead). The loop runs
+// continuously and only writes currentFrame while playing, so a paused/stepped
+// frame keeps the value we commanded.
+function startPlaybackTracking() {
+    if (playbackTrackingStarted) return;
+    if (typeof video.requestVideoFrameCallback !== 'function') return;
+    playbackTrackingStarted = true;
+    const onFrame = (now, metadata) => {
+        if (videoIndex) {
+            const frame = frameAtTime(metadata.mediaTime);
+            // One-time sanity check that the demuxed table matches the playback
+            // clock (catches an exotic edit list we failed to account for).
+            if (!alignmentChecked) {
+                alignmentChecked = true;
+                const residual = Math.abs(videoIndex.pts[frame] - metadata.mediaTime);
+                if (residual > 0.010) {
+                    console.warn('Frame index alignment residual', residual, 's');
+                    showToast('Warning: frame index may be misaligned for this '
+                        + 'video — verify before relying on indices', 4000);
+                }
+            }
+            if (!video.paused) {
+                currentFrame = frame;
+                updateFrameUI();
+            }
+        }
+        video.requestVideoFrameCallback(onFrame);
+    };
+    video.requestVideoFrameCallback(onFrame);
+}
 
 // --- Controls ---
 
@@ -254,36 +519,30 @@ video.addEventListener('ended', () => {
 });
 
 video.addEventListener('timeupdate', () => {
-    updateTimeDisplay();
+    updateFrameUI();
 });
 
 frameInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
-        const frame = parseInt(frameInput.value) || 0;
-        video.currentTime = frame / getFPS();
+        seekToFrame(parseInt(frameInput.value) || 0);
         frameInput.blur();
-        updateTimeDisplay();
     }
 });
 
+// The seek slider is in FRAME units (min 0, max nFrames-1, step 1), so dragging
+// lands on exact frames rather than the old coarse one-second resolution.
 seekSlider.addEventListener('mousedown', () => seekSlider._dragging = true);
 seekSlider.addEventListener('mouseup', () => seekSlider._dragging = false);
 seekSlider.addEventListener('input', () => {
-    video.currentTime = seekSlider.value;
-    updateTimeDisplay();
+    seekToFrame(parseInt(seekSlider.value) || 0);
 });
 
-function updateTimeDisplay() {
-    if (!seekSlider._dragging) {
-        seekSlider.value = video.currentTime;
-    }
-    const cur = formatTime(video.currentTime);
-    const dur = formatTime(video.duration || 0);
-    timeDisplay.innerText = `${cur} / ${dur}`;
-
-    const frame = Math.floor(video.currentTime * getFPS());
-    if (document.activeElement !== frameInput) {
-        frameInput.value = frame;
+function updateFrameUI() {
+    const duration = video.duration || 0;
+    timeDisplay.innerText = `${formatTime(video.currentTime || 0)} / ${formatTime(duration)}`;
+    if (videoIndex) {
+        if (!seekSlider._dragging) seekSlider.value = currentFrame;
+        if (document.activeElement !== frameInput) frameInput.value = currentFrame;
     }
     updateFrameAnnotations();
 }
@@ -292,9 +551,9 @@ function updateTimeDisplay() {
 // the distinct event types whose committed annotations span the current frame
 // (point annotations on exactly this frame, range annotations enclosing it).
 // In-progress ranges are excluded since they are not committed yet. Driven by
-// both frame changes (updateTimeDisplay) and annotation edits (renderAnnotations).
+// both frame changes (updateFrameUI) and annotation edits (renderAnnotations).
 function updateFrameAnnotations() {
-    const frame = Math.floor(video.currentTime * getFPS());
+    const frame = currentFrame;
     const names = [];
     state.annotations.forEach(a => {
         if (a.startFrame <= frame && a.endFrame >= frame
@@ -388,22 +647,22 @@ window.addEventListener('keydown', (e) => {
         (t.removeShortcut || t.shortcut.toUpperCase()) === e.key);
 
     if (addType) {
-        const currentFrame = Math.floor(video.currentTime * getFPS());
+        const frame = currentFrame;
 
         if (addType.type === 'point') {
             // Guard against double-annotating: pressing the same hotkey twice on
             // the same frame would otherwise create an identical duplicate point.
             const alreadyAnnotated = state.annotations.some(a =>
                 a.typeName === addType.name
-                && a.startFrame === currentFrame
-                && a.endFrame === currentFrame);
+                && a.startFrame === frame
+                && a.endFrame === frame);
             if (alreadyAnnotated) {
-                showToast(`Frame ${currentFrame} already annotated with "${addType.name}"`);
+                showToast(`Frame ${frame} already annotated with "${addType.name}"`);
             } else {
                 state.annotations.push({
                     typeName: addType.name,
-                    startFrame: currentFrame,
-                    endFrame: currentFrame
+                    startFrame: frame,
+                    endFrame: frame
                 });
             }
         } else {
@@ -414,19 +673,19 @@ window.addEventListener('keydown', (e) => {
                 const marked = state.activeRanges[addType.name];
                 state.annotations.push({
                     typeName: addType.name,
-                    startFrame: Math.min(marked, currentFrame),
-                    endFrame: Math.max(marked, currentFrame)
+                    startFrame: Math.min(marked, frame),
+                    endFrame: Math.max(marked, frame)
                 });
                 delete state.activeRanges[addType.name];
             } else {
                 // Start the range
-                state.activeRanges[addType.name] = currentFrame;
-                console.log(`Started range for ${addType.name} at ${currentFrame}`);
+                state.activeRanges[addType.name] = frame;
+                console.log(`Started range for ${addType.name} at ${frame}`);
             }
         }
         renderAnnotations();
     } else if (removeType) {
-        const currentFrame = Math.floor(video.currentTime * getFPS());
+        const frame = currentFrame;
 
         if (removeType.type === 'range') {
             if (state.activeRanges[removeType.name] !== undefined) {
@@ -436,15 +695,15 @@ window.addEventListener('keydown', (e) => {
                 // Find completed ranges of this type that span the current frame.
                 const matches = state.annotations.filter(a =>
                     a.typeName === removeType.name
-                    && a.startFrame <= currentFrame
-                    && a.endFrame >= currentFrame);
+                    && a.startFrame <= frame
+                    && a.endFrame >= frame);
                 if (matches.length === 0) {
-                    showToast(`No "${removeType.name}" annotation at frame ${currentFrame} to remove`);
+                    showToast(`No "${removeType.name}" annotation at frame ${frame} to remove`);
                 } else if (matches.length === 1) {
                     state.annotations.splice(state.annotations.indexOf(matches[0]), 1);
                 } else {
                     showToast(`${matches.length} different "${removeType.name}" ranges span `
-                        + `frame ${currentFrame}, so nothing was deleted -- use the del `
+                        + `frame ${frame}, so nothing was deleted -- use the del `
                         + `button to remove a specific one`, 3000);
                 }
             }
@@ -452,10 +711,10 @@ window.addEventListener('keydown', (e) => {
             // Point: an exact frame match (at most one per type per frame).
             const index = state.annotations.findIndex(a =>
                 a.typeName === removeType.name
-                && a.startFrame === currentFrame
-                && a.endFrame === currentFrame);
+                && a.startFrame === frame
+                && a.endFrame === frame);
             if (index === -1) {
-                showToast(`No "${removeType.name}" annotation at frame ${currentFrame} to remove`);
+                showToast(`No "${removeType.name}" annotation at frame ${frame} to remove`);
             } else {
                 state.annotations.splice(index, 1);
             }
@@ -466,13 +725,11 @@ window.addEventListener('keydown', (e) => {
     // Frame stepping: arrow keys and comma/period
     if (e.key === 'ArrowLeft' || e.key === ',') {
         e.preventDefault();
-        video.currentTime = Math.max(0, video.currentTime - 1 / getFPS());
-        updateTimeDisplay();
+        stepFrame(-1);
     }
     if (e.key === 'ArrowRight' || e.key === '.') {
         e.preventDefault();
-        video.currentTime = Math.min(video.duration, video.currentTime + 1 / getFPS());
-        updateTimeDisplay();
+        stepFrame(1);
     }
 
     // Space to play/pause
@@ -488,11 +745,8 @@ function renderAnnotations() {
     // options applied as successive tiebreakers (see compareAnnotations).
     const sorted = [...state.annotations].sort(compareAnnotations);
 
-    sorted.forEach((ann, idx) => {
+    sorted.forEach((ann) => {
         const tr = document.createElement('tr');
-        if (state.activeRanges[ann.typeName] !== undefined && ann.endFrame === ann.startFrame) {
-            // This is an active range being shown as a point until finished
-        }
         tr.innerHTML = `
             <td onclick="jumpToFrame(${ann.startFrame})" style="cursor:pointer; color:var(--accent)">${ann.typeName}</td>
             <td>${ann.startFrame}</td>
@@ -505,8 +759,7 @@ function renderAnnotations() {
         annotationsBody.appendChild(tr);
     });
 
-    // Also show active ranges somehow? 
-    // Let's add an 'active' section or just rows in the table
+    // Show any in-progress ranges (recording, not yet committed) at the top.
     Object.keys(state.activeRanges).forEach(name => {
         const tr = document.createElement('tr');
         tr.style.opacity = '0.6';
@@ -524,7 +777,7 @@ function renderAnnotations() {
 }
 
 window.jumpToFrame = (frame) => {
-    video.currentTime = frame / getFPS();
+    seekToFrame(frame);
 };
 
 window.cancelRange = (name) => {
@@ -561,9 +814,23 @@ exportBtn.addEventListener('click', () => {
         }, 1000);
         return;
     }
-    const exportData = { ...state, fps: getFPS() };
-    delete exportData.activeRanges;
-    if (videoFileName) exportData.video = videoFileName;
+    // Frame indices are the canonical record. We also write each annotation's
+    // exact presentation time in seconds (derived from the frame index table)
+    // as provenance, plus the detected frame-rate metadata.
+    const exportData = {
+        video: videoFileName || undefined,
+        frameRate: videoIndex ? (videoIndex.isVFR ? 'variable' : videoIndex.fps) : undefined,
+        isVariableFrameRate: videoIndex ? videoIndex.isVFR : undefined,
+        nFrames: videoIndex ? videoIndex.nFrames : undefined,
+        eventTypes: state.eventTypes,
+        annotations: state.annotations.map(a => ({
+            typeName: a.typeName,
+            startFrame: a.startFrame,
+            endFrame: a.endFrame,
+            startTime: videoIndex ? videoIndex.pts[a.startFrame] : undefined,
+            endTime: videoIndex ? videoIndex.pts[a.endFrame] : undefined,
+        })),
+    };
     const data = JSON.stringify(exportData, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -581,9 +848,15 @@ function importJsonFile(file) {
         try {
             const imported = JSON.parse(event.target.result);
             if (imported.eventTypes && imported.annotations) {
-                if (imported.fps) fpsInput.value = imported.fps;
-                state = imported;
-                state.activeRanges = {};
+                state = {
+                    eventTypes: imported.eventTypes,
+                    annotations: imported.annotations.map(a => ({
+                        typeName: a.typeName,
+                        startFrame: a.startFrame,
+                        endFrame: a.endFrame,
+                    })),
+                    activeRanges: {},
+                };
                 renderEventTypes();
                 renderAnnotations();
             }
